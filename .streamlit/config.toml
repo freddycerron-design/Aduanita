@@ -1,0 +1,14 @@
+# Tema de AduANITA: "mesa de cartas nauticas" -- fondo oscuro tipo carta de
+# navegacion, con los documentos (inputs, tarjetas de datos) en tono papel
+# de manifiesto. Ver frontend/dashboard.py -> _inyectar_estilos() para la
+# tipografia y los componentes custom que complementan este theme base.
+[theme]
+base = "dark"
+primaryColor = "#B8863B"
+backgroundColor = "#101A24"
+secondaryBackgroundColor = "#F4EFE1"
+textColor = "#EDE7D8"
+font = "sans serif"
+
+[server]
+headless = true

@@ -11,6 +11,7 @@ previsualizar los PDFs originales guardados en Supabase Storage.
 """
 from __future__ import annotations
 
+import html
 import os
 
 import httpx
@@ -28,6 +29,161 @@ API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
 TIPOS_DOCUMENTO = ["FACTURA", "SEGURO", "SWIFT_BANCARIO", "BL"]
 
 st.set_page_config(page_title="AduANITA", page_icon="📦", layout="wide")
+
+
+# ---------------------------------------------------------------------
+# Estilos: tema "mesa de cartas nauticas" -- fondo oscuro tipo carta de
+# navegacion, con los documentos (tarjetas de datos, inputs) en tono papel
+# de manifiesto. Los colores base (fondo, superficie secundaria, acento)
+# se definen en .streamlit/config.toml; aqui se agrega la tipografia real
+# (config.toml solo permite "sans serif"/"serif"/"monospace" genericos) y
+# los componentes custom: renglones de discrepancia tipo libro contable,
+# tarjeta hero de clasificacion, y encabezado tipo carta para el correo.
+# ---------------------------------------------------------------------
+
+_CSS_ADUANITA = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'Inter', sans-serif;
+}
+h1, h2, h3 {
+    font-family: 'Fraunces', serif !important;
+    letter-spacing: -0.01em;
+}
+.mono {
+    font-family: 'IBM Plex Mono', monospace;
+}
+
+/* Sidebar y widgets nativos viven sobre secondaryBackgroundColor (papel) */
+[data-testid="stSidebar"] {
+    border-right: 1px solid #1E2E3D;
+}
+[data-testid="stSidebar"] * {
+    color: #1B1B16 !important;
+}
+[data-testid="stTextInput"] input,
+[data-testid="stTextArea"] textarea {
+    font-family: 'Inter', sans-serif !important;
+}
+
+/* Header del despacho */
+.despacho-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.85rem;
+    margin-bottom: 0.15rem;
+}
+.despacho-numero {
+    font-size: 1.7rem;
+    font-weight: 600;
+    color: #D8A857;
+}
+.despacho-cliente {
+    color: #9AA5AD;
+    margin-bottom: 1.1rem;
+}
+.status-badge {
+    display: inline-block;
+    padding: 0.15rem 0.65rem;
+    border: 1px solid #B8863B;
+    border-radius: 3px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #D8A857;
+}
+
+/* Renglones de discrepancia, estilo libro de manifiesto */
+.ledger-row {
+    display: flex;
+    gap: 0.9rem;
+    align-items: flex-start;
+    padding: 0.6rem 0;
+    border-top: 1px solid #24384A;
+}
+.ledger-row:last-of-type {
+    border-bottom: 1px solid #24384A;
+}
+.ledger-chip {
+    flex-shrink: 0;
+    margin-top: 0.15rem;
+    padding: 0.1rem 0.55rem;
+    border-radius: 2px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: #101A24;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+.ledger-row--ALTA .ledger-chip { background: #C24B3E; }
+.ledger-row--MEDIA .ledger-chip { background: #C79A45; }
+.ledger-row--NINGUNA .ledger-chip { background: #4F8467; }
+.ledger-row-body {
+    font-size: 0.92rem;
+    line-height: 1.45;
+    color: #EDE7D8;
+}
+.ledger-row-body b { color: #ffffff; }
+
+/* Tarjeta hero de clasificacion arancelaria */
+.classification-hero {
+    background: #F4EFE1;
+    color: #1B1B16;
+    border-radius: 3px;
+    padding: 1.1rem 1.3rem;
+    margin-bottom: 0.9rem;
+}
+.classification-hero .subpartida {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 2rem;
+    font-weight: 600;
+}
+.confidence-chip {
+    display: inline-block;
+    margin-left: 0.6rem;
+    padding: 0.18rem 0.6rem;
+    border-radius: 2px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+    color: #F4EFE1;
+}
+.confidence-chip--ALTA { background: #3F6E52; }
+.confidence-chip--MEDIA { background: #A87A2E; }
+.confidence-chip--BAJA { background: #B23A2E; }
+.classification-hero .sustento {
+    margin-top: 0.65rem;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: #5A5648;
+}
+
+/* Encabezado tipo carta para el borrador de correo */
+.letter-header {
+    background: #F4EFE1;
+    color: #1B1B16;
+    padding: 0.7rem 1.1rem;
+    border-radius: 3px 3px 0 0;
+    border-bottom: 2px solid #B8863B;
+    font-family: 'Fraunces', serif;
+    font-size: 0.95rem;
+}
+</style>
+"""
+
+
+def _inyectar_estilos() -> None:
+    st.markdown(_CSS_ADUANITA, unsafe_allow_html=True)
+
+
+_inyectar_estilos()
 
 
 # ---------------------------------------------------------------------
@@ -201,8 +357,21 @@ if not detalle:
     st.stop()
 
 despacho_info = detalle["despacho"]
-st.title(f"Despacho {despacho_info['numero_despacho']}")
-st.caption(f"Cliente: {despacho_info['cliente']} · Estado actual: **{despacho_info['estado']}**")
+# Los valores de numero_despacho/cliente son texto libre ingresado por el
+# especialista; se escapan antes de inyectarlos como HTML crudo.
+_numero_html = html.escape(despacho_info["numero_despacho"])
+_cliente_html = html.escape(despacho_info["cliente"])
+_estado_html = html.escape(despacho_info["estado"])
+st.markdown(
+    f"""
+    <div class="despacho-header">
+        <span class="despacho-numero mono">{_numero_html}</span>
+        <span class="status-badge">{_estado_html}</span>
+    </div>
+    <div class="despacho-cliente">Cliente: {_cliente_html}</div>
+    """,
+    unsafe_allow_html=True,
+)
 
 documentos_por_tipo = {d["tipo_documento"]: d for d in detalle["documentos"]}
 
@@ -283,24 +452,38 @@ with col_derecha:
     if not validaciones:
         st.info("Aun no se han ejecutado las validaciones para este despacho.")
     else:
-        for v in validaciones:
-            texto = f"**{v['regla']}** — {v['detalle']}"
-            if v["severidad"] == "ALTA":
-                st.error(texto)
-            elif v["severidad"] == "MEDIA":
-                st.warning(texto)
-            else:
-                st.success(texto)
+        # regla es un identificador fijo (services/validation_engine.py); el
+        # detalle interpola texto extraido de los PDF por Gemini (nombres,
+        # montos), por lo que se escapa antes de inyectarlo como HTML.
+        filas = [
+            f'<div class="ledger-row ledger-row--{v["severidad"]}">'
+            f'<span class="ledger-chip">{v["severidad"]}</span>'
+            f'<span class="ledger-row-body"><b>{html.escape(v["regla"])}</b> — {html.escape(v["detalle"])}</span>'
+            f"</div>"
+            for v in validaciones
+        ]
+        st.markdown("".join(filas), unsafe_allow_html=True)
 
     st.subheader("📦 Propuesta de partida arancelaria")
     clasificacion = detalle.get("clasificacion")
     if not clasificacion:
         st.info("Aun no se ha ejecutado la clasificacion para este despacho.")
     else:
-        col_a, col_b = st.columns(2)
-        col_a.metric("Subpartida sugerida", clasificacion["subpartida_sugerida"])
-        col_b.metric("Nivel de confianza", clasificacion["nivel_confianza"])
-        st.markdown(f"**Sustento legal (RGI):** {clasificacion['sustento_legal_rgi']}")
+        # subpartida_sugerida es un codigo controlado (Pydantic), pero
+        # sustento_legal_rgi es texto libre generado por Gemini -> se escapa.
+        _subpartida_html = html.escape(clasificacion["subpartida_sugerida"])
+        _confianza = clasificacion["nivel_confianza"]
+        _sustento_html = html.escape(clasificacion["sustento_legal_rgi"])
+        st.markdown(
+            f"""
+            <div class="classification-hero">
+                <span class="subpartida">{_subpartida_html}</span>
+                <span class="confidence-chip confidence-chip--{_confianza}">{_confianza}</span>
+                <div class="sustento"><b>Sustento legal (RGI):</b> {_sustento_html}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         if clasificacion["informacion_faltante_alert"]:
             st.warning(
                 "Informacion faltante para elevar la confianza:\n"
@@ -312,9 +495,14 @@ with col_derecha:
     if not borrador:
         st.info("Aun no se ha generado un borrador de correo para este despacho.")
     else:
-        st.text_input("Asunto", value=borrador["asunto"], disabled=True, key="asunto_borrador")
+        st.markdown(
+            f'<div class="letter-header">✉️ {html.escape(borrador["asunto"])}</div>',
+            unsafe_allow_html=True,
+        )
         cuerpo_actual = borrador.get("cuerpo_editado") or borrador["cuerpo"]
-        nuevo_cuerpo = st.text_area("Cuerpo (editable)", value=cuerpo_actual, height=260, key="cuerpo_borrador")
+        nuevo_cuerpo = st.text_area(
+            "Cuerpo (editable)", value=cuerpo_actual, height=260, key="cuerpo_borrador", label_visibility="collapsed"
+        )
         st.caption("Este correo no se envia automaticamente: copialo y envialo desde tu cliente de correo habitual.")
         if st.button("💾 Guardar edicion del borrador"):
             actualizado = api_patch(f"/borradores/{borrador['id']}", {"cuerpo_editado": nuevo_cuerpo})
