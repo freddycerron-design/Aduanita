@@ -56,12 +56,26 @@ h1, h2, h3 {
     font-family: 'IBM Plex Mono', monospace;
 }
 
-/* Sidebar y widgets nativos viven sobre secondaryBackgroundColor (papel) */
+/* Sidebar y widgets nativos (inputs, textarea, uploader, selectbox) viven
+   sobre secondaryBackgroundColor (papel): sin esto heredan el textColor
+   global (claro, pensado para el fondo oscuro) y quedan casi ilegibles
+   sobre el fondo claro -- letra clara sobre papel claro. */
 [data-testid="stSidebar"] {
     border-right: 1px solid #1E2E3D;
 }
-[data-testid="stSidebar"] * {
+[data-testid="stSidebar"] *,
+[data-testid="stTextInput"] input,
+[data-testid="stTextArea"] textarea,
+[data-testid="stFileUploader"] *,
+[data-testid="stSelectbox"] *,
+div[data-baseweb="popover"] *,
+div[data-baseweb="menu"] * {
     color: #1B1B16 !important;
+}
+[data-testid="stTextInput"] input::placeholder,
+[data-testid="stTextArea"] textarea::placeholder {
+    color: #6B6558 !important;
+    opacity: 1;
 }
 [data-testid="stTextInput"] input,
 [data-testid="stTextArea"] textarea {
@@ -260,26 +274,30 @@ def obtener_pdf_bytes(path_storage: str) -> bytes | None:
 # ---------------------------------------------------------------------
 
 def pantalla_login() -> None:
-    st.title("📦 AduANITA")
-    st.caption("Automatizacion de revision documental aduanera y clasificacion arancelaria asistida.")
+    # La app usa layout="wide" para el dashboard; el login se centra en una
+    # columna angosta en vez de estirarse a todo el ancho de la pantalla.
+    _, columna_central, _ = st.columns([1, 1.1, 1])
+    with columna_central:
+        st.title("📦 AduANITA")
+        st.caption("Automatizacion de revision documental aduanera y clasificacion arancelaria asistida.")
 
-    with st.form("login_form"):
-        email = st.text_input("Correo electronico")
-        password = st.text_input("Contrasena", type="password")
-        enviado = st.form_submit_button("Ingresar")
+        with st.form("login_form"):
+            email = st.text_input("Correo electronico")
+            password = st.text_input("Contrasena", type="password")
+            enviado = st.form_submit_button("Ingresar", use_container_width=True)
 
-    if enviado:
-        try:
-            resultado = get_supabase_client().auth.sign_in_with_password(
-                {"email": email, "password": password}
-            )
-        except Exception as error:
-            st.error(f"No se pudo iniciar sesion: {error}")
-        else:
-            st.session_state["access_token"] = resultado.session.access_token
-            st.session_state["user_id"] = resultado.user.id
-            st.session_state["user_email"] = resultado.user.email
-            st.rerun()
+        if enviado:
+            try:
+                resultado = get_supabase_client().auth.sign_in_with_password(
+                    {"email": email, "password": password}
+                )
+            except Exception as error:
+                st.error(f"No se pudo iniciar sesion: {error}")
+            else:
+                st.session_state["access_token"] = resultado.session.access_token
+                st.session_state["user_id"] = resultado.user.id
+                st.session_state["user_email"] = resultado.user.email
+                st.rerun()
 
     st.stop()
 
@@ -382,13 +400,15 @@ documentos_por_tipo = {d["tipo_documento"]: d for d in detalle["documentos"]}
 documentos_minimos_ok = {"FACTURA", "BL"}.issubset(documentos_por_tipo.keys())
 
 with st.expander("📤 Carga de documentos", expanded=not documentos_minimos_ok):
+    st.caption("Selecciona el PDF de cada tipo: la extraccion arranca sola, sin boton adicional.")
     columnas = st.columns(4)
     for columna, tipo in zip(columnas, TIPOS_DOCUMENTO):
         with columna:
             cargado = tipo in documentos_por_tipo
             st.markdown(f"**{tipo}** {'✅' if cargado else '⬜'}")
             archivo = st.file_uploader(f"PDF {tipo}", type="pdf", key=f"upload_{tipo}", label_visibility="collapsed")
-            if archivo is not None and st.button(f"Subir {tipo}", key=f"btn_upload_{tipo}"):
+
+            def _subir(tipo=tipo, archivo=archivo) -> None:
                 with st.spinner(f"Extrayendo datos de {tipo}..."):
                     resultado = api_post(
                         f"/despachos/{id_despacho}/documentos",
@@ -398,6 +418,17 @@ with st.expander("📤 Carga de documentos", expanded=not documentos_minimos_ok)
                 if resultado:
                     st.success(f"{tipo} procesado correctamente.")
                     st.rerun()
+
+            if archivo is not None and not cargado:
+                # Un solo paso: en cuanto se selecciona el archivo, se sube
+                # y procesa automaticamente (sin boton extra que confirmar).
+                _subir()
+            elif archivo is not None and cargado:
+                # Ya hay un documento de este tipo cargado; si el especialista
+                # selecciona otro PDF, se pide confirmacion explicita antes de
+                # sobrescribir el ya procesado.
+                if st.button(f"🔁 Reemplazar {tipo}", key=f"btn_replace_{tipo}"):
+                    _subir()
 
     if documentos_minimos_ok:
         faltantes_opcionales = {"SEGURO", "SWIFT_BANCARIO"} - documentos_por_tipo.keys()
