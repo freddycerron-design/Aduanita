@@ -43,43 +43,52 @@ st.set_page_config(page_title="AduANITA", page_icon="📦", layout="wide")
 
 _CSS_ADUANITA = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root {
+    --bg: #10141C;
+    --surface: #171B2C;
+    --surface-border: #262B40;
+    --coral: #E2583E;
+    --indigo: #2E2F5C;
+    --amber: #E0A83E;
+    --verde: #3FA36B;
+    --rojo: #DF4C3A;
+    --texto: #F4F5F7;
+    --texto-secundario: #93A0B4;
+}
 
 html, body, [class*="css"] {
     font-family: 'Inter', sans-serif;
 }
 h1, h2, h3 {
-    font-family: 'Fraunces', serif !important;
+    font-family: 'Inter', sans-serif !important;
+    font-weight: 700 !important;
     letter-spacing: -0.01em;
 }
 .mono {
     font-family: 'IBM Plex Mono', monospace;
 }
 
-/* Sidebar y widgets nativos (inputs, textarea, uploader, selectbox) viven
-   sobre secondaryBackgroundColor (papel): sin esto heredan el textColor
-   global (claro, pensado para el fondo oscuro) y quedan casi ilegibles
-   sobre el fondo claro -- letra clara sobre papel claro. */
+/* Sidebar: misma superficie oscura que el resto (ya no hay fondo claro
+   separado, asi que no hace falta forzar el color de texto por widget). */
 [data-testid="stSidebar"] {
-    border-right: 1px solid #1E2E3D;
+    background: var(--surface);
+    border-right: 1px solid var(--surface-border);
 }
-[data-testid="stSidebar"] *,
+
 [data-testid="stTextInput"] input,
 [data-testid="stTextArea"] textarea,
-[data-testid="stFileUploader"] *,
-[data-testid="stSelectbox"] *,
-div[data-baseweb="popover"] *,
-div[data-baseweb="menu"] * {
-    color: #1B1B16 !important;
-}
-[data-testid="stTextInput"] input::placeholder,
-[data-testid="stTextArea"] textarea::placeholder {
-    color: #6B6558 !important;
-    opacity: 1;
-}
-[data-testid="stTextInput"] input,
-[data-testid="stTextArea"] textarea {
+[data-testid="stSelectbox"] * {
     font-family: 'Inter', sans-serif !important;
+}
+
+/* Botones tipo "pill" (completamente redondeados), como en la referencia */
+.stButton > button,
+[data-testid="stFormSubmitButton"] button,
+[data-testid="stDownloadButton"] button {
+    border-radius: 999px !important;
+    font-weight: 600 !important;
 }
 
 /* Header del despacho */
@@ -91,64 +100,64 @@ div[data-baseweb="menu"] * {
 }
 .despacho-numero {
     font-size: 1.7rem;
-    font-weight: 600;
-    color: #D8A857;
+    font-weight: 700;
+    color: var(--coral);
 }
 .despacho-cliente {
-    color: #9AA5AD;
+    color: var(--texto-secundario);
     margin-bottom: 1.1rem;
 }
 .status-badge {
     display: inline-block;
-    padding: 0.15rem 0.65rem;
-    border: 1px solid #B8863B;
-    border-radius: 3px;
+    padding: 0.2rem 0.8rem;
+    background: var(--amber);
+    border-radius: 999px;
     font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 0.06em;
+    font-weight: 700;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: #D8A857;
+    color: #241A05;
 }
 
-/* Renglones de discrepancia, estilo libro de manifiesto */
+/* Renglones de discrepancia */
 .ledger-row {
     display: flex;
     gap: 0.9rem;
     align-items: flex-start;
-    padding: 0.6rem 0;
-    border-top: 1px solid #24384A;
-}
-.ledger-row:last-of-type {
-    border-bottom: 1px solid #24384A;
+    padding: 0.65rem 0.9rem;
+    margin-bottom: 0.4rem;
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 12px;
 }
 .ledger-chip {
     flex-shrink: 0;
-    margin-top: 0.15rem;
-    padding: 0.1rem 0.55rem;
-    border-radius: 2px;
-    font-family: 'IBM Plex Mono', monospace;
+    margin-top: 0.1rem;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
     font-size: 0.66rem;
-    font-weight: 600;
+    font-weight: 700;
     letter-spacing: 0.04em;
-    color: #101A24;
+    color: #ffffff;
     text-transform: uppercase;
     white-space: nowrap;
 }
-.ledger-row--ALTA .ledger-chip { background: #C24B3E; }
-.ledger-row--MEDIA .ledger-chip { background: #C79A45; }
-.ledger-row--NINGUNA .ledger-chip { background: #4F8467; }
+.ledger-row--ALTA .ledger-chip { background: var(--rojo); }
+.ledger-row--MEDIA .ledger-chip { background: var(--amber); color: #241A05; }
+.ledger-row--NINGUNA .ledger-chip { background: var(--verde); }
 .ledger-row-body {
     font-size: 0.92rem;
     line-height: 1.45;
-    color: #EDE7D8;
+    color: var(--texto);
 }
 .ledger-row-body b { color: #ffffff; }
 
 /* Tarjeta hero de clasificacion arancelaria */
 .classification-hero {
-    background: #F4EFE1;
-    color: #1B1B16;
-    border-radius: 3px;
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    color: var(--texto);
+    border-radius: 14px;
     padding: 1.1rem 1.3rem;
     margin-bottom: 0.9rem;
 }
@@ -156,37 +165,39 @@ div[data-baseweb="menu"] * {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 2rem;
     font-weight: 600;
+    color: var(--coral);
 }
 .confidence-chip {
     display: inline-block;
     margin-left: 0.6rem;
-    padding: 0.18rem 0.6rem;
-    border-radius: 2px;
+    padding: 0.2rem 0.7rem;
+    border-radius: 999px;
     font-size: 0.68rem;
-    font-weight: 600;
+    font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     vertical-align: middle;
-    color: #F4EFE1;
+    color: #ffffff;
 }
-.confidence-chip--ALTA { background: #3F6E52; }
-.confidence-chip--MEDIA { background: #A87A2E; }
-.confidence-chip--BAJA { background: #B23A2E; }
+.confidence-chip--ALTA { background: var(--verde); }
+.confidence-chip--MEDIA { background: var(--amber); color: #241A05; }
+.confidence-chip--BAJA { background: var(--rojo); }
 .classification-hero .sustento {
     margin-top: 0.65rem;
     font-size: 0.85rem;
     line-height: 1.5;
-    color: #5A5648;
+    color: var(--texto-secundario);
 }
 
 /* Encabezado tipo carta para el borrador de correo */
 .letter-header {
-    background: #F4EFE1;
-    color: #1B1B16;
-    padding: 0.7rem 1.1rem;
-    border-radius: 3px 3px 0 0;
-    border-bottom: 2px solid #B8863B;
-    font-family: 'Fraunces', serif;
+    background: var(--surface);
+    color: var(--texto);
+    padding: 0.75rem 1.1rem;
+    border: 1px solid var(--surface-border);
+    border-bottom: 2px solid var(--coral);
+    border-radius: 14px 14px 0 0;
+    font-weight: 600;
     font-size: 0.95rem;
 }
 </style>

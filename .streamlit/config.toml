@@ -1,13 +1,15 @@
-# Tema de AduANITA: "mesa de cartas nauticas" -- fondo oscuro tipo carta de
-# navegacion, con los documentos (inputs, tarjetas de datos) en tono papel
-# de manifiesto. Ver frontend/dashboard.py -> _inyectar_estilos() para la
-# tipografia y los componentes custom que complementan este theme base.
+# Tema de AduANITA -- paleta tomada de EstimaDORA (app hermana): fondo azul
+# marino casi negro, tarjetas en un azul marino apenas mas claro, acento
+# coral/naranja como color primario. Ver frontend/dashboard.py ->
+# _inyectar_estilos() para los componentes custom que complementan este
+# theme base (config.toml solo cubre colores; la tipografia real y las
+# tarjetas de discrepancia/clasificacion/correo se definen ahi).
 [theme]
 base = "dark"
-primaryColor = "#B8863B"
-backgroundColor = "#101A24"
-secondaryBackgroundColor = "#F4EFE1"
-textColor = "#EDE7D8"
+primaryColor = "#E2583E"
+backgroundColor = "#10141C"
+secondaryBackgroundColor = "#171B2C"
+textColor = "#F4F5F7"
 font = "sans serif"
 
 [server]
