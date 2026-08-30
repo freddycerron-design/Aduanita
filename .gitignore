@@ -1,0 +1,17 @@
+# Entorno virtual y cache de Python
+.venv/
+__pycache__/
+*.pyc
+
+# Variables de entorno con secretos -- NUNCA subir esto al repositorio
+.env
+
+# PDFs de prueba generados localmente
+pdfs_prueba/
+
+# Archivos de IDE
+.vscode/
+.idea/
+
+# Configuracion local de Claude Code (especifica de esta maquina)
+.claude/
