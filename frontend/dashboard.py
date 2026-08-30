@@ -1,16 +1,20 @@
 """
-Dashboard Streamlit de AduANITA: interfaz de trabajo del especialista
-aduanero.
+Dashboard Streamlit de AduANITA: interfaz de trabajo del especialista y del
+liquidador aduanero.
 
-Layout split-screen: documentos extraidos (izquierda) vs. discrepancias,
-propuesta de clasificacion, borrador de correo y decision (derecha).
+Layout tipo IDE: una barra de iconos siempre visible a la izquierda (panel
+"Archivos" = explorador de despachos agrupados por estado, panel "Cuenta"
+= sesion/rol/logout) y el contenido principal en 3 tabs: Revision (carga de
+documentos + discrepancias + visor JSON/PDF), Clasificacion (propuesta IA +
+decision del liquidador) y Correo (borrador editable).
 
 Se conecta al backend FastAPI (API_BASE_URL) para todo el pipeline, y
-directamente a Supabase Auth solo para el login del especialista y para
-previsualizar los PDFs originales guardados en Supabase Storage.
+directamente a Supabase Auth solo para el login y para previsualizar los
+PDFs originales guardados en Supabase Storage.
 """
 from __future__ import annotations
 
+import base64
 import html
 import os
 
@@ -28,17 +32,22 @@ API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
 
 TIPOS_DOCUMENTO = ["FACTURA", "SEGURO", "SWIFT_BANCARIO", "BL"]
 
+# Estados del despacho (ver app/main.py) y su etiqueta/grupo en el Explorer.
+GRUPOS_ESTADO = [
+    ("REVISION_DOC", "📋 Revisión Doc."),
+    ("CLASIFICACION", "🏷️ Clasificación"),
+    ("REVISADO", "✅ Revisados"),
+    ("OBSERVADO", "⚠️ Observados"),
+]
+
 st.set_page_config(page_title="AduANITA", page_icon="📦", layout="wide")
 
 
 # ---------------------------------------------------------------------
-# Estilos: tema "mesa de cartas nauticas" -- fondo oscuro tipo carta de
-# navegacion, con los documentos (tarjetas de datos, inputs) en tono papel
-# de manifiesto. Los colores base (fondo, superficie secundaria, acento)
-# se definen en .streamlit/config.toml; aqui se agrega la tipografia real
-# (config.toml solo permite "sans serif"/"serif"/"monospace" genericos) y
-# los componentes custom: renglones de discrepancia tipo libro contable,
-# tarjeta hero de clasificacion, y encabezado tipo carta para el correo.
+# Estilos: paleta navy + coral (tomada de EstimaDORA, app hermana). Los
+# colores base se definen en .streamlit/config.toml; aqui se agrega la
+# tipografia real y los componentes custom (renglones de discrepancia,
+# tarjeta hero de clasificacion, encabezado tipo carta para el correo).
 # ---------------------------------------------------------------------
 
 _CSS_ADUANITA = """
@@ -61,7 +70,7 @@ _CSS_ADUANITA = """
 html, body, [class*="css"] {
     font-family: 'Inter', sans-serif;
 }
-h1, h2, h3 {
+h1, h2, h3, h4, h5 {
     font-family: 'Inter', sans-serif !important;
     font-weight: 700 !important;
     letter-spacing: -0.01em;
@@ -70,8 +79,6 @@ h1, h2, h3 {
     font-family: 'IBM Plex Mono', monospace;
 }
 
-/* Sidebar: misma superficie oscura que el resto (ya no hay fondo claro
-   separado, asi que no hace falta forzar el color de texto por widget). */
 [data-testid="stSidebar"] {
     background: var(--surface);
     border-right: 1px solid var(--surface-border);
@@ -83,12 +90,18 @@ h1, h2, h3 {
     font-family: 'Inter', sans-serif !important;
 }
 
-/* Botones tipo "pill" (completamente redondeados), como en la referencia */
+/* Botones tipo "pill" (completamente redondeados) */
 .stButton > button,
 [data-testid="stFormSubmitButton"] button,
 [data-testid="stDownloadButton"] button {
     border-radius: 999px !important;
     font-weight: 600 !important;
+}
+/* Barra de iconos: botones cuadrados, no pill */
+.icon-rail .stButton > button {
+    border-radius: 10px !important;
+    font-size: 1.1rem !important;
+    padding: 0.4rem !important;
 }
 
 /* Header del despacho */
@@ -126,7 +139,7 @@ h1, h2, h3 {
     align-items: flex-start;
     padding: 0.65rem 0.9rem;
     margin-bottom: 0.4rem;
-    background: var(--surface);
+    background: var(--bg);
     border: 1px solid var(--surface-border);
     border-radius: 12px;
 }
@@ -199,6 +212,19 @@ h1, h2, h3 {
     border-radius: 14px 14px 0 0;
     font-weight: 600;
     font-size: 0.95rem;
+}
+
+/* Badge de rol en el panel de cuenta */
+.rol-badge {
+    display: inline-block;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    border: 1px solid var(--coral);
+    color: var(--coral);
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
 }
 </style>
 """
@@ -308,6 +334,21 @@ def pantalla_login() -> None:
                 st.session_state["access_token"] = resultado.session.access_token
                 st.session_state["user_id"] = resultado.user.id
                 st.session_state["user_email"] = resultado.user.email
+                # El rol (ESPECIALISTA/LIQUIDADOR/ADMIN) determina que
+                # acciones puede tomar en el flujo -- se lee 1 sola vez al
+                # loguearse desde perfiles_especialista (RLS permite a
+                # cualquier autenticado leer esa tabla).
+                try:
+                    perfil = (
+                        get_supabase_client()
+                        .table("perfiles_especialista")
+                        .select("rol")
+                        .eq("id", resultado.user.id)
+                        .execute()
+                    )
+                    st.session_state["user_rol"] = perfil.data[0]["rol"] if perfil.data else "ESPECIALISTA"
+                except Exception:
+                    st.session_state["user_rol"] = "ESPECIALISTA"
                 st.rerun()
 
     st.stop()
@@ -316,60 +357,91 @@ def pantalla_login() -> None:
 if "access_token" not in st.session_state:
     pantalla_login()
 
+USER_ROL = st.session_state.get("user_rol", "ESPECIALISTA")
+PUEDE_ENVIAR_A_CLASIFICACION = USER_ROL in ("ESPECIALISTA", "ADMIN")
+PUEDE_DECIDIR_CLASIFICACION = USER_ROL in ("LIQUIDADOR", "ADMIN")
+
 
 # ---------------------------------------------------------------------
-# Sidebar: sesion + seleccion/alta de despacho
+# Barra de iconos (siempre visible) + panel activo del Explorer
 # ---------------------------------------------------------------------
 
 with st.sidebar:
-    st.write(f"👤 {st.session_state['user_email']}")
-    if st.button("Cerrar sesion"):
-        try:
-            get_supabase_client().auth.sign_out()
-        except Exception:
-            pass
-        st.session_state.clear()
-        st.rerun()
+    st.markdown('<div class="icon-rail">', unsafe_allow_html=True)
+    col_icono_1, col_icono_2 = st.columns(2)
+    with col_icono_1:
+        if st.button("📁", key="icono_archivos", help="Despachos", use_container_width=True):
+            st.session_state["panel_activo"] = "archivos"
+    with col_icono_2:
+        if st.button("👤", key="icono_cuenta", help="Cuenta", use_container_width=True):
+            st.session_state["panel_activo"] = "cuenta"
+    st.markdown("</div>", unsafe_allow_html=True)
 
+    panel_activo = st.session_state.get("panel_activo", "archivos")
     st.divider()
-    st.subheader("Despachos")
 
-    despachos = api_get("/despachos") or []
-    # Se indexa por id (estable) en vez de por la etiqueta visible, porque
-    # la etiqueta incluye el estado del despacho: si dependieramos del
-    # texto para recordar la seleccion, cada accion que cambia el estado
-    # (subir un documento, validar, clasificar...) haria que Streamlit no
-    # reconozca la opcion anterior tras el rerun y reinicie la seleccion.
-    etiquetas_por_id = {
-        d["id"]: f"{d['numero_despacho']} · {d['cliente']} ({d['estado']})" for d in despachos
-    }
-    ids_ordenados = list(etiquetas_por_id.keys())
-    etiquetas = ["➕ Nuevo despacho"] + [etiquetas_por_id[i] for i in ids_ordenados]
+    if panel_activo == "cuenta":
+        st.subheader("Cuenta")
+        st.write(f"👤 {st.session_state['user_email']}")
+        st.markdown(f'<span class="rol-badge">{html.escape(USER_ROL)}</span>', unsafe_allow_html=True)
+        st.caption(
+            "El rol define que acciones puedes tomar: el especialista sube "
+            "documentos y envia a clasificacion; el liquidador acepta u "
+            "observa la propuesta de subpartida."
+        )
+        st.divider()
+        if st.button("Cerrar sesion", use_container_width=True):
+            try:
+                get_supabase_client().auth.sign_out()
+            except Exception:
+                pass
+            st.session_state.clear()
+            st.rerun()
 
-    id_actual = st.session_state.get("id_despacho_actual")
-    indice_defecto = (ids_ordenados.index(id_actual) + 1) if id_actual in ids_ordenados else 0
+    else:
+        st.subheader("Explorer")
 
-    etiqueta_seleccionada = st.selectbox("Selecciona un despacho", etiquetas, index=indice_defecto)
+        if st.button("➕ Nuevo despacho", use_container_width=True):
+            st.session_state["mostrar_form_nuevo"] = not st.session_state.get("mostrar_form_nuevo", False)
 
-    if etiqueta_seleccionada == "➕ Nuevo despacho":
-        with st.form("nuevo_despacho_form"):
-            numero = st.text_input("Numero de despacho")
-            cliente = st.text_input("Cliente")
-            crear = st.form_submit_button("Crear despacho")
-        if crear:
-            if not numero or not cliente:
-                st.error("Numero de despacho y cliente son obligatorios.")
-            else:
-                nuevo = api_post("/despachos", json_body={"numero_despacho": numero, "cliente": cliente})
-                if nuevo:
-                    st.session_state["id_despacho_actual"] = nuevo["id"]
-                    st.rerun()
-        st.stop()
+        if st.session_state.get("mostrar_form_nuevo"):
+            with st.form("nuevo_despacho_form"):
+                numero = st.text_input("Numero de despacho")
+                cliente = st.text_input("Cliente")
+                crear = st.form_submit_button("Crear despacho", use_container_width=True)
+            if crear:
+                if not numero or not cliente:
+                    st.error("Numero de despacho y cliente son obligatorios.")
+                else:
+                    nuevo = api_post("/despachos", json_body={"numero_despacho": numero, "cliente": cliente})
+                    if nuevo:
+                        st.session_state["id_despacho_actual"] = nuevo["id"]
+                        st.session_state["mostrar_form_nuevo"] = False
+                        st.rerun()
 
-    st.session_state["id_despacho_actual"] = ids_ordenados[etiquetas.index(etiqueta_seleccionada) - 1]
+        busqueda = st.text_input("🔍 Buscar por número", key="busqueda_despacho", label_visibility="collapsed", placeholder="🔍 Buscar por número")
 
-    if st.button("🔄 Refrescar"):
-        st.rerun()
+        despachos = api_get("/despachos") or []
+        if busqueda:
+            despachos = [d for d in despachos if busqueda.strip().lower() in d["numero_despacho"].lower()]
+
+        id_actual = st.session_state.get("id_despacho_actual")
+        for estado_valor, etiqueta in GRUPOS_ESTADO:
+            grupo = [d for d in despachos if d["estado"] == estado_valor]
+            grupo_activo = any(d["id"] == id_actual for d in grupo)
+            with st.expander(f"{etiqueta} ({len(grupo)})", expanded=bool(grupo) or grupo_activo):
+                if not grupo:
+                    st.caption("Sin despachos.")
+                for d in grupo:
+                    seleccionado = d["id"] == id_actual
+                    if st.button(
+                        f"{'▶ ' if seleccionado else ''}{d['numero_despacho']} · {d['cliente']}",
+                        key=f"despacho_btn_{d['id']}",
+                        use_container_width=True,
+                        type="primary" if seleccionado else "secondary",
+                    ):
+                        st.session_state["id_despacho_actual"] = d["id"]
+                        st.rerun()
 
 
 # ---------------------------------------------------------------------
@@ -378,7 +450,7 @@ with st.sidebar:
 
 id_despacho = st.session_state.get("id_despacho_actual")
 if not id_despacho:
-    st.info("Selecciona o crea un despacho en la barra lateral para comenzar.")
+    st.info("Selecciona o crea un despacho en el panel Explorer (icono 📁 de la izquierda) para comenzar.")
     st.stop()
 
 detalle = api_get(f"/despachos/{id_despacho}")
@@ -386,11 +458,12 @@ if not detalle:
     st.stop()
 
 despacho_info = detalle["despacho"]
+estado_actual = despacho_info["estado"]
 # Los valores de numero_despacho/cliente son texto libre ingresado por el
 # especialista; se escapan antes de inyectarlos como HTML crudo.
 _numero_html = html.escape(despacho_info["numero_despacho"])
 _cliente_html = html.escape(despacho_info["cliente"])
-_estado_html = html.escape(despacho_info["estado"])
+_estado_html = html.escape(estado_actual)
 st.markdown(
     f"""
     <div class="despacho-header">
@@ -403,116 +476,183 @@ st.markdown(
 )
 
 documentos_por_tipo = {d["tipo_documento"]: d for d in detalle["documentos"]}
-
-# --- Carga de documentos ---------------------------------------------------
-# El backend solo exige FACTURA + BL como minimo para /validar (ver
-# app.main._ejecutar_validacion); SEGURO y SWIFT_BANCARIO son opcionales y
-# solo habilitan reglas de validacion adicionales.
+validaciones = detalle.get("validaciones") or []
+clasificacion = detalle.get("clasificacion")
+borrador = detalle.get("borrador")
 documentos_minimos_ok = {"FACTURA", "BL"}.issubset(documentos_por_tipo.keys())
 
-with st.expander("📤 Carga de documentos", expanded=not documentos_minimos_ok):
-    st.caption("Selecciona el PDF de cada tipo: la extraccion arranca sola, sin boton adicional.")
-    columnas = st.columns(4)
-    for columna, tipo in zip(columnas, TIPOS_DOCUMENTO):
-        with columna:
-            cargado = tipo in documentos_por_tipo
-            st.markdown(f"**{tipo}** {'✅' if cargado else '⬜'}")
-            archivo = st.file_uploader(f"PDF {tipo}", type="pdf", key=f"upload_{tipo}", label_visibility="collapsed")
+tab_revision, tab_clasificacion, tab_correo = st.tabs(
+    ["📋 Revisión", "🏷️ Clasificación", "✉️ Correo"]
+)
 
-            def _subir(tipo=tipo, archivo=archivo) -> None:
-                with st.spinner(f"Extrayendo datos de {tipo}..."):
-                    resultado = api_post(
-                        f"/despachos/{id_despacho}/documentos",
-                        data={"tipo_documento": tipo},
-                        files={"archivo": (archivo.name, archivo.getvalue(), "application/pdf")},
-                    )
-                if resultado:
-                    st.success(f"{tipo} procesado correctamente.")
-                    st.rerun()
-
-            if archivo is not None and not cargado:
-                # Un solo paso: en cuanto se selecciona el archivo, se sube
-                # y procesa automaticamente (sin boton extra que confirmar).
-                _subir()
-            elif archivo is not None and cargado:
-                # Ya hay un documento de este tipo cargado; si el especialista
-                # selecciona otro PDF, se pide confirmacion explicita antes de
-                # sobrescribir el ya procesado.
-                if st.button(f"🔁 Reemplazar {tipo}", key=f"btn_replace_{tipo}"):
-                    _subir()
-
-    if documentos_minimos_ok:
-        faltantes_opcionales = {"SEGURO", "SWIFT_BANCARIO"} - documentos_por_tipo.keys()
-        if faltantes_opcionales:
-            st.caption(
-                f"Falta(n) {', '.join(sorted(faltantes_opcionales))} (opcional): esas validaciones "
-                f"cruzadas quedaran marcadas como 'no verificable' hasta que los cargues."
-            )
-        if st.button("▶️ Ejecutar pipeline completo (validar + clasificar + borrador)", type="primary"):
-            with st.spinner("Ejecutando validaciones, clasificacion y borrador de correo..."):
-                resultado = api_post(f"/pipeline/{id_despacho}/ejecutar-completo")
-            if resultado:
-                st.success("Pipeline ejecutado correctamente.")
-                st.rerun()
-    else:
-        st.info("Carga al menos Factura y BL para poder ejecutar el pipeline (Seguro y SWIFT son opcionales).")
-
-st.divider()
-
-col_izquierda, col_derecha = st.columns(2)
-
-# --- Columna izquierda: documentos extraidos --------------------------------
-with col_izquierda:
-    st.subheader("📄 Documentos extraidos")
-    tabs = st.tabs(TIPOS_DOCUMENTO)
-    for tab, tipo in zip(tabs, TIPOS_DOCUMENTO):
-        with tab:
-            doc = documentos_por_tipo.get(tipo)
-            if not doc:
-                st.info(f"Aun no se ha cargado el documento {tipo}.")
-                continue
-
-            metodo = doc["metodo_extraccion"]
-            icono = "🔎 OCR/Vision (PDF escaneado)" if metodo == "GEMINI_VISION" else "📝 Texto digital"
-            st.caption(f"Metodo de extraccion: {icono}")
-            st.json(doc["contenido_json"])
-
-            pdf_bytes = obtener_pdf_bytes(doc["url_pdf_storage"])
-            if pdf_bytes:
-                st.download_button(
-                    f"⬇️ Descargar PDF original",
-                    data=pdf_bytes,
-                    file_name=f"{despacho_info['numero_despacho']}_{tipo}.pdf",
-                    mime="application/pdf",
-                    key=f"descarga_{tipo}",
+# --- Tab 1: carga de documentos + discrepancias (mitad superior) y  --------
+# --- visor JSON/PDF elegido por el usuario (mitad inferior) ----------------
+with tab_revision:
+    with st.container(height=430, border=False):
+        st.markdown("##### 📤 Documentos")
+        st.caption("Selecciona el PDF de cada tipo: la extraccion arranca sola, sin boton adicional.")
+        columnas = st.columns(4)
+        for columna, tipo in zip(columnas, TIPOS_DOCUMENTO):
+            with columna:
+                cargado = tipo in documentos_por_tipo
+                st.markdown(f"**{tipo}** {'✅' if cargado else '⬜'}")
+                archivo = st.file_uploader(
+                    f"PDF {tipo}", type="pdf", key=f"upload_{tipo}", label_visibility="collapsed"
                 )
 
-# --- Columna derecha: validaciones, clasificacion, correo, decision --------
-with col_derecha:
-    st.subheader("🔍 Alertas de discrepancias")
-    validaciones = detalle.get("validaciones") or []
-    if not validaciones:
-        st.info("Aun no se han ejecutado las validaciones para este despacho.")
-    else:
-        # regla es un identificador fijo (services/validation_engine.py); el
-        # detalle interpola texto extraido de los PDF por Gemini (nombres,
-        # montos), por lo que se escapa antes de inyectarlo como HTML.
-        filas = [
-            f'<div class="ledger-row ledger-row--{v["severidad"]}">'
-            f'<span class="ledger-chip">{v["severidad"]}</span>'
-            f'<span class="ledger-row-body"><b>{html.escape(v["regla"])}</b> — {html.escape(v["detalle"])}</span>'
-            f"</div>"
-            for v in validaciones
-        ]
-        st.markdown("".join(filas), unsafe_allow_html=True)
+                def _subir(tipo=tipo, archivo=archivo) -> None:
+                    with st.spinner(f"Extrayendo datos de {tipo}..."):
+                        resultado = api_post(
+                            f"/despachos/{id_despacho}/documentos",
+                            data={"tipo_documento": tipo},
+                            files={"archivo": (archivo.name, archivo.getvalue(), "application/pdf")},
+                        )
+                    if resultado:
+                        st.success(f"{tipo} procesado correctamente.")
+                        st.rerun()
 
-    st.subheader("📦 Propuesta de partida arancelaria")
-    clasificacion = detalle.get("clasificacion")
-    if not clasificacion:
-        st.info("Aun no se ha ejecutado la clasificacion para este despacho.")
+                if archivo is not None and not cargado:
+                    # Un solo paso: en cuanto se selecciona el archivo, se
+                    # sube y procesa automaticamente (sin boton extra).
+                    _subir()
+                elif archivo is not None and cargado:
+                    if st.button(f"🔁 Reemplazar {tipo}", key=f"btn_replace_{tipo}"):
+                        _subir()
+
+        st.divider()
+        st.markdown("##### 🔍 Discrepancias")
+        if not documentos_minimos_ok:
+            st.info("Carga al menos Factura y BL para poder validar (Seguro y SWIFT son opcionales).")
+        elif not validaciones:
+            st.caption("Aun no se ha ejecutado la validacion. Se ejecuta automaticamente al enviar a clasificacion.")
+        else:
+            # regla es un identificador fijo (services/validation_engine.py);
+            # el detalle interpola texto extraido por Gemini -> se escapa.
+            filas = [
+                f'<div class="ledger-row ledger-row--{v["severidad"]}">'
+                f'<span class="ledger-chip">{v["severidad"]}</span>'
+                f'<span class="ledger-row-body"><b>{html.escape(v["regla"])}</b> — {html.escape(v["detalle"])}</span>'
+                f"</div>"
+                for v in validaciones
+            ]
+            st.markdown("".join(filas), unsafe_allow_html=True)
+
+    st.divider()
+    st.markdown("##### 👁️ Visor de documentos")
+    col_selector, col_modo = st.columns([2, 1])
+    with col_selector:
+        tipo_visor = st.selectbox("Documento", TIPOS_DOCUMENTO, key="visor_tipo_doc", label_visibility="collapsed")
+    with col_modo:
+        modo_visor = st.radio(
+            "Ver como", ["JSON", "PDF"], key="visor_modo", horizontal=True, label_visibility="collapsed"
+        )
+
+    doc_visor = documentos_por_tipo.get(tipo_visor)
+    if not doc_visor:
+        st.info(f"Aun no se ha cargado el documento {tipo_visor}.")
+    elif modo_visor == "JSON":
+        metodo = doc_visor["metodo_extraccion"]
+        icono = "🔎 OCR/Vision (PDF escaneado)" if metodo == "GEMINI_VISION" else "📝 Texto digital"
+        st.caption(f"Metodo de extraccion: {icono}")
+        st.json(doc_visor["contenido_json"])
     else:
-        # subpartida_sugerida es un codigo controlado (Pydantic), pero
-        # sustento_legal_rgi es texto libre generado por Gemini -> se escapa.
+        pdf_bytes = obtener_pdf_bytes(doc_visor["url_pdf_storage"])
+        if pdf_bytes:
+            _pdf_b64 = base64.b64encode(pdf_bytes).decode()
+            st.markdown(
+                f'<iframe src="data:application/pdf;base64,{_pdf_b64}" width="100%" height="480" '
+                f'style="border:1px solid #262B40;border-radius:12px;"></iframe>',
+                unsafe_allow_html=True,
+            )
+            st.download_button(
+                "⬇️ Descargar PDF original",
+                data=pdf_bytes,
+                file_name=f"{despacho_info['numero_despacho']}_{tipo_visor}.pdf",
+                mime="application/pdf",
+                key=f"descarga_{tipo_visor}",
+            )
+
+# --- Tab 2: propuesta de clasificacion + decision del liquidador -----------
+with tab_clasificacion:
+    decision = detalle.get("decision")
+
+    if estado_actual == "REVISION_DOC":
+        st.info("Este despacho aun no fue enviado a clasificacion.")
+        if PUEDE_ENVIAR_A_CLASIFICACION:
+            if st.button(
+                "📤 Enviar a Clasificación",
+                type="primary",
+                disabled=not documentos_minimos_ok,
+                help=None if documentos_minimos_ok else "Carga al menos Factura y BL primero.",
+            ):
+                with st.spinner("Validando documentos y generando la propuesta de clasificacion..."):
+                    resultado = api_post(f"/despachos/{id_despacho}/enviar-a-clasificacion")
+                if resultado:
+                    st.success("Despacho enviado a clasificacion.")
+                    st.rerun()
+        else:
+            st.caption("Solo un especialista puede enviar este despacho a clasificacion.")
+
+    elif estado_actual in ("REVISADO", "OBSERVADO"):
+        # Despacho ya cerrado: la fuente de verdad es la decision persistida
+        # (historial_clasificaciones), no la cache de clasificacion en
+        # memoria del backend -- esa se limpia justo al decidir (ver
+        # app.main.registrar_decision), por diseno, para evitar decisiones
+        # duplicadas sobre la misma propuesta.
+        if clasificacion is not None:
+            _subpartida_html = html.escape(clasificacion["subpartida_sugerida"])
+            _confianza = clasificacion["nivel_confianza"]
+            _sustento_html = html.escape(clasificacion["sustento_legal_rgi"])
+            st.markdown(
+                f"""
+                <div class="classification-hero">
+                    <span class="subpartida">{_subpartida_html}</span>
+                    <span class="confidence-chip confidence-chip--{_confianza}">{_confianza}</span>
+                    <div class="sustento"><b>Sustento legal (RGI):</b> {_sustento_html}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        elif decision is not None:
+            _subpartida_html = html.escape(decision["subpartida_final_humano"])
+            _accion_html = html.escape(decision["tipo_accion"])
+            st.markdown(
+                f"""
+                <div class="classification-hero">
+                    <span class="subpartida">{_subpartida_html}</span>
+                    <span class="confidence-chip confidence-chip--{'ALTA' if _accion_html == 'APROBADO' else 'BAJA'}">{_accion_html}</span>
+                    <div class="sustento">Subpartida final decidida por el liquidador.</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info("No hay informacion de clasificacion disponible para este despacho.")
+
+        if estado_actual == "REVISADO":
+            st.success("✅ Este despacho fue **REVISADO**: el liquidador acepto la propuesta.")
+        else:
+            _motivo = decision.get("motivo_modificacion") if decision else None
+            st.warning(
+                "⚠️ Este despacho fue **OBSERVADO** por el liquidador."
+                + (f" Motivo: {_motivo}" if _motivo else "")
+            )
+
+    elif clasificacion is None:
+        # Estado CLASIFICACION pero la cache en memoria del backend se
+        # perdio (p.ej. tras un reinicio del proceso) -- limitacion
+        # conocida del MVP (ver app/main.py, _cache_clasificaciones).
+        st.warning(
+            "No se encontro la propuesta de clasificacion en memoria (puede pasar si el backend se "
+            "reinicio). Vuelve a enviar el despacho a clasificacion."
+        )
+        if PUEDE_ENVIAR_A_CLASIFICACION and st.button("🔁 Reintentar clasificacion", type="primary"):
+            with st.spinner("Generando la propuesta de clasificacion..."):
+                resultado = api_post(f"/despachos/{id_despacho}/enviar-a-clasificacion")
+            if resultado:
+                st.rerun()
+
+    else:
         _subpartida_html = html.escape(clasificacion["subpartida_sugerida"])
         _confianza = clasificacion["nivel_confianza"]
         _sustento_html = html.escape(clasificacion["sustento_legal_rgi"])
@@ -532,10 +672,52 @@ with col_derecha:
                 + "\n".join(f"- {i}" for i in clasificacion["informacion_faltante_alert"])
             )
 
-    st.subheader("✉️ Borrador de correo")
-    borrador = detalle.get("borrador")
+        if not PUEDE_DECIDIR_CLASIFICACION:
+            st.caption("Solo un liquidador puede aceptar u observar esta clasificacion.")
+        else:
+            st.markdown("##### Decisión del liquidador")
+            factura_doc = documentos_por_tipo.get("FACTURA")
+            accion_label = st.radio(
+                "¿La propuesta es correcta?",
+                ["Revisión conforme", "Observar"],
+                key="accion_decision",
+                horizontal=True,
+            )
+            subpartida_final = clasificacion["subpartida_sugerida"]
+            motivo = None
+            if accion_label == "Observar":
+                subpartida_final = st.text_input(
+                    "Subpartida corregida", value=clasificacion["subpartida_sugerida"], key="subpartida_corregida"
+                )
+                motivo = st.text_area("Motivo de la observación (obligatorio)", key="motivo_observacion")
+
+            if st.button("Confirmar decisión", type="primary"):
+                if accion_label == "Observar" and not (motivo and motivo.strip()):
+                    st.error("Debes indicar el motivo de la observación.")
+                else:
+                    descripcion_comercial = (
+                        factura_doc["contenido_json"].get("descripcion_mercancia", "") if factura_doc else ""
+                    )
+                    atributos = {
+                        "incoterm": factura_doc["contenido_json"].get("incoterm") if factura_doc else None,
+                    }
+                    cuerpo_decision = {
+                        "accion": "REVISADO" if accion_label == "Revisión conforme" else "OBSERVADO",
+                        "subpartida_sugerida_ia": clasificacion["subpartida_sugerida"],
+                        "subpartida_final": subpartida_final,
+                        "descripcion_comercial": descripcion_comercial,
+                        "atributos": atributos,
+                        "motivo_modificacion": motivo,
+                    }
+                    resultado = api_post(f"/despachos/{id_despacho}/decision", json_body=cuerpo_decision)
+                    if resultado:
+                        st.success("Decision registrada. El RAG fue actualizado con este feedback.")
+                        st.rerun()
+
+# --- Tab 3: borrador de correo ----------------------------------------------
+with tab_correo:
     if not borrador:
-        st.info("Aun no se ha generado un borrador de correo para este despacho.")
+        st.info("Aun no se ha generado un borrador de correo (se genera al enviar a clasificacion).")
     else:
         st.markdown(
             f'<div class="letter-header">✉️ {html.escape(borrador["asunto"])}</div>',
@@ -543,53 +725,11 @@ with col_derecha:
         )
         cuerpo_actual = borrador.get("cuerpo_editado") or borrador["cuerpo"]
         nuevo_cuerpo = st.text_area(
-            "Cuerpo (editable)", value=cuerpo_actual, height=260, key="cuerpo_borrador", label_visibility="collapsed"
+            "Cuerpo (editable)", value=cuerpo_actual, height=320, key="cuerpo_borrador", label_visibility="collapsed"
         )
         st.caption("Este correo no se envia automaticamente: copialo y envialo desde tu cliente de correo habitual.")
-        if st.button("💾 Guardar edicion del borrador"):
+        if st.button("💾 Guardar edición del borrador"):
             actualizado = api_patch(f"/borradores/{borrador['id']}", {"cuerpo_editado": nuevo_cuerpo})
             if actualizado:
                 st.success("Borrador actualizado.")
                 st.rerun()
-
-    st.subheader("✅ Decision del especialista")
-    factura_doc = documentos_por_tipo.get("FACTURA")
-
-    if not clasificacion:
-        st.info("Debes ejecutar la clasificacion antes de poder aprobar o corregir la propuesta.")
-    elif despacho_info["estado"] in ("APROBADO", "CORREGIDO"):
-        st.success(f"Este despacho ya fue marcado como **{despacho_info['estado']}**.")
-    else:
-        accion_label = st.radio(
-            "Decision sobre la propuesta de la IA", ["Aprobar partida", "Corregir partida"], key="accion_decision"
-        )
-        subpartida_final = clasificacion["subpartida_sugerida"]
-        motivo = None
-        if accion_label == "Corregir partida":
-            subpartida_final = st.text_input(
-                "Subpartida corregida", value=clasificacion["subpartida_sugerida"], key="subpartida_corregida"
-            )
-            motivo = st.text_area("Motivo de la correccion (obligatorio)", key="motivo_correccion")
-
-        if st.button("Confirmar decision", type="primary"):
-            if accion_label == "Corregir partida" and not (motivo and motivo.strip()):
-                st.error("Debes indicar el motivo de la correccion.")
-            else:
-                descripcion_comercial = (
-                    factura_doc["contenido_json"].get("descripcion_mercancia", "") if factura_doc else ""
-                )
-                atributos = {
-                    "incoterm": factura_doc["contenido_json"].get("incoterm") if factura_doc else None,
-                }
-                cuerpo_decision = {
-                    "accion": "APROBADO" if accion_label == "Aprobar partida" else "EDITADO",
-                    "subpartida_sugerida_ia": clasificacion["subpartida_sugerida"],
-                    "subpartida_final": subpartida_final,
-                    "descripcion_comercial": descripcion_comercial,
-                    "atributos": atributos,
-                    "motivo_modificacion": motivo,
-                }
-                resultado = api_post(f"/despachos/{id_despacho}/decision", json_body=cuerpo_decision)
-                if resultado:
-                    st.success("Decision registrada. El RAG fue actualizado con este feedback.")
-                    st.rerun()

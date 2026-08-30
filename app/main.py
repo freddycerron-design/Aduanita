@@ -2,17 +2,22 @@
 Backend FastAPI de AduANITA: expone el pipeline completo de revision
 documental aduanera y clasificacion arancelaria asistida.
 
-Orden tipico del pipeline para un despacho:
-  1. POST /despachos                                -> crear despacho
-  2. POST /despachos/{id}/documentos  (x4)           -> subir y extraer cada PDF
-  3. POST /despachos/{id}/validar                    -> validaciones cruzadas
-  4. POST /despachos/{id}/clasificar                 -> propuesta de subpartida (RAG + Gemini)
-  5. POST /despachos/{id}/generar-borrador           -> borrador de correo
-  6. (el especialista revisa en el dashboard)
-  7. POST /despachos/{id}/decision                   -> aprobar/corregir -> feedback al RAG
+Maquina de estados del despacho (4 estados, dos roles distintos):
+  REVISION_DOC -> CLASIFICACION -> REVISADO | OBSERVADO
 
-Los pasos 3-5 tambien se pueden ejecutar de corrido con
-POST /pipeline/{id}/ejecutar-completo.
+  1. POST /despachos                                       -> crear despacho (estado=REVISION_DOC)
+  2. POST /despachos/{id}/documentos  (x2 minimo: FACTURA+BL) -> subir y extraer cada PDF
+  3. POST /despachos/{id}/validar                          -> validaciones cruzadas (no cambia estado)
+  4. POST /despachos/{id}/enviar-a-clasificacion            -> ESPECIALISTA: valida + clasifica (RAG+Gemini)
+                                                                 + genera borrador -> estado=CLASIFICACION
+  5. (el liquidador revisa la propuesta en el dashboard)
+  6. POST /despachos/{id}/decision                         -> LIQUIDADOR: acepta (REVISADO) u observa
+                                                                 (OBSERVADO, con motivo) -> feedback al RAG
+
+Los endpoints granulares /validar, /clasificar y /generar-borrador siguen
+disponibles por separado (util para depurar via /docs), pero no mueven el
+estado del despacho por si solos -- solo /enviar-a-clasificacion y
+/decision lo hacen, que son las dos transiciones reales del flujo.
 """
 from __future__ import annotations
 
@@ -82,12 +87,14 @@ def _ahora_iso() -> str:
 class UsuarioAutenticado(BaseModel):
     id: str
     email: str | None
+    rol: str
     access_token: str
 
 
 def get_current_user(authorization: str = Header(...)) -> UsuarioAutenticado:
     """Valida el JWT de Supabase Auth enviado en el header Authorization
-    (formato 'Bearer <token>') y devuelve el usuario autenticado."""
+    (formato 'Bearer <token>') y devuelve el usuario autenticado, incluyendo
+    su rol de negocio (ESPECIALISTA/LIQUIDADOR/ADMIN) desde perfiles_especialista."""
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Falta el header 'Authorization: Bearer <token>'.")
 
@@ -101,7 +108,22 @@ def get_current_user(authorization: str = Header(...)) -> UsuarioAutenticado:
     if resultado is None or resultado.user is None:
         raise HTTPException(status_code=401, detail="Token invalido o expirado.")
 
-    return UsuarioAutenticado(id=resultado.user.id, email=resultado.user.email, access_token=token)
+    perfil = (
+        admin.table("perfiles_especialista").select("rol").eq("id", resultado.user.id).execute()
+    )
+    rol = perfil.data[0]["rol"] if perfil.data else "ESPECIALISTA"
+
+    return UsuarioAutenticado(id=resultado.user.id, email=resultado.user.email, rol=rol, access_token=token)
+
+
+def _requiere_rol(usuario: UsuarioAutenticado, roles_permitidos: set[str]) -> None:
+    """Verifica que el usuario tenga uno de los roles permitidos para la
+    accion (ADMIN siempre esta autorizado, sin importar la lista)."""
+    if usuario.rol != "ADMIN" and usuario.rol not in roles_permitidos:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Esta accion requiere el rol {'/'.join(sorted(roles_permitidos))} (tu rol es {usuario.rol}).",
+        )
 
 
 # ---------------------------------------------------------------------
@@ -152,6 +174,11 @@ class DespachoDetalleOut(BaseModel):
     validaciones: list[ResultadoValidacionOut]
     clasificacion: PropuestaClasificacionOut | None
     borrador: BorradorCorreoOut | None
+    # Decision ya persistida del liquidador (REVISADO/OBSERVADO). Es la
+    # fuente de verdad para despachos ya cerrados: `clasificacion` es una
+    # cache en memoria del proceso que se limpia justo al decidir (ver
+    # registrar_decision), asi que no sirve para mostrar el resultado final.
+    decision: HistorialClasificacionOut | None = None
 
 
 class ActualizarBorradorRequest(BaseModel):
@@ -159,7 +186,9 @@ class ActualizarBorradorRequest(BaseModel):
 
 
 class DecisionRequest(BaseModel):
-    accion: Literal["APROBADO", "EDITADO"]
+    # REVISADO: el liquidador acepta la propuesta de la IA tal cual.
+    # OBSERVADO: el liquidador la rechaza/corrige (motivo_modificacion obligatorio).
+    accion: Literal["REVISADO", "OBSERVADO"]
     subpartida_sugerida_ia: str
     subpartida_final: str
     descripcion_comercial: str
@@ -173,6 +202,7 @@ class HistorialClasificacionOut(BaseModel):
     subpartida_sugerida_ia: str
     subpartida_final_humano: str
     tipo_accion: str
+    motivo_modificacion: str | None = None
     peso_prioridad: float
     aprobado_por: str
 
@@ -245,9 +275,9 @@ def _ejecutar_validacion(admin: Client, id_despacho: str) -> list[ResultadoValid
     ]
     admin.table("resultados_validacion").insert(filas_insertar).execute()
 
-    hay_alertas = any(r.severidad == "ALTA" for r in resultados)
-    _actualizar_estado_despacho(admin, id_despacho, "VALIDADO_CON_ALERTAS" if hay_alertas else "VALIDADO_OK")
-
+    # La validacion en si no mueve el estado del despacho (se queda en
+    # REVISION_DOC); las discrepancias quedan disponibles en el tab de
+    # revision para que el especialista decida cuando enviar a clasificar.
     return resultados
 
 
@@ -272,7 +302,8 @@ def _ejecutar_clasificacion(admin: Client, id_despacho: str) -> PropuestaClasifi
 
     _cache_clasificaciones[id_despacho] = propuesta
     _cache_info_suficiente[id_despacho] = info_suficiente
-    _actualizar_estado_despacho(admin, id_despacho, "CLASIFICADO_IA")
+    # El cambio de estado a CLASIFICACION lo hace el endpoint
+    # enviar-a-clasificacion, que es quien orquesta este paso.
 
     return propuesta
 
@@ -351,12 +382,23 @@ def obtener_despacho(id_despacho: str, usuario: UsuarioAutenticado = Depends(get
     )
     borrador = borrador_respuesta.data[0] if borrador_respuesta.data else None
 
+    decision_respuesta = (
+        admin.table("historial_clasificaciones")
+        .select("*")
+        .eq("id_despacho", id_despacho)
+        .order("creado_en", desc=True)
+        .limit(1)
+        .execute()
+    )
+    decision = decision_respuesta.data[0] if decision_respuesta.data else None
+
     return {
         "despacho": despacho,
         "documentos": documentos,
         "validaciones": validaciones,
         "clasificacion": clasificacion,
         "borrador": borrador,
+        "decision": decision,
     }
 
 
@@ -368,7 +410,7 @@ def subir_documento(
     usuario: UsuarioAutenticado = Depends(get_current_user),
 ) -> dict:
     admin = get_supabase_admin_client()
-    despacho = _obtener_despacho_o_404(admin, id_despacho)
+    _obtener_despacho_o_404(admin, id_despacho)  # 404 si el despacho no existe
 
     if tipo_documento not in TIPO_A_SCHEMA:
         raise HTTPException(status_code=400, detail=f"tipo_documento invalido: {tipo_documento}")
@@ -380,7 +422,10 @@ def subir_documento(
     try:
         modelo, metodo_extraccion = procesar_documento(pdf_bytes, tipo_documento)
     except ExtraccionFallidaError as error:
-        _actualizar_estado_despacho(admin, id_despacho, "ERROR")
+        # La nueva maquina de estados no tiene un estado ERROR propio: el
+        # despacho se queda en REVISION_DOC y el 422 es la senal de que
+        # este documento en particular no se pudo procesar (el especialista
+        # puede reintentar subiendo el mismo PDF u otro).
         raise HTTPException(status_code=422, detail=str(error)) from error
 
     path_storage = f"{id_despacho}/{tipo_documento}.pdf"
@@ -399,9 +444,8 @@ def subir_documento(
         fila, on_conflict="id_despacho,tipo_documento"
     ).execute()
 
-    if despacho["estado"] == "PENDIENTE_DOCUMENTOS":
-        _actualizar_estado_despacho(admin, id_despacho, "EXTRAYENDO")
-
+    # Subir un documento no mueve el estado del despacho: se queda en
+    # REVISION_DOC hasta que el especialista lo envie a clasificar.
     return respuesta.data[0]
 
 
@@ -447,11 +491,28 @@ def registrar_decision(
     datos: DecisionRequest,
     usuario: UsuarioAutenticado = Depends(get_current_user),
 ) -> dict:
-    admin = get_supabase_admin_client()
-    _obtener_despacho_o_404(admin, id_despacho)
+    # Solo el liquidador (o un admin) puede aceptar/observar la propuesta
+    # de clasificacion -- es la accion que cierra el flujo del despacho.
+    _requiere_rol(usuario, {"LIQUIDADOR"})
 
-    if datos.accion == "EDITADO" and not datos.motivo_modificacion:
-        raise HTTPException(status_code=400, detail="motivo_modificacion es obligatorio cuando accion='EDITADO'.")
+    admin = get_supabase_admin_client()
+    despacho = _obtener_despacho_o_404(admin, id_despacho)
+    if despacho["estado"] != "CLASIFICACION":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Solo se puede aceptar/observar un despacho en estado CLASIFICACION "
+                f"(estado actual: {despacho['estado']}). Primero debe enviarse a clasificacion."
+            ),
+        )
+
+    if datos.accion == "OBSERVADO" and not datos.motivo_modificacion:
+        raise HTTPException(status_code=400, detail="motivo_modificacion es obligatorio cuando accion='OBSERVADO'.")
+
+    # El feedback al RAG usa internamente el vocabulario APROBADO/EDITADO
+    # (peso_prioridad de historial_clasificaciones), independiente del
+    # nombre del estado del despacho (REVISADO/OBSERVADO).
+    tipo_accion_rag = "APROBADO" if datos.accion == "REVISADO" else "EDITADO"
 
     cliente_usuario = get_supabase_user_client(usuario.access_token)
     fila_creada = guardar_feedback(
@@ -461,31 +522,35 @@ def registrar_decision(
         atributos=datos.atributos,
         subpartida_sugerida_ia=datos.subpartida_sugerida_ia,
         subpartida_final_humano=datos.subpartida_final,
-        tipo_accion=datos.accion,
+        tipo_accion=tipo_accion_rag,
         aprobado_por=usuario.id,
         motivo_modificacion=datos.motivo_modificacion,
     )
 
-    _actualizar_estado_despacho(admin, id_despacho, "APROBADO" if datos.accion == "APROBADO" else "CORREGIDO")
+    _actualizar_estado_despacho(admin, id_despacho, datos.accion)  # "REVISADO" u "OBSERVADO"
     _cache_clasificaciones.pop(id_despacho, None)
     _cache_info_suficiente.pop(id_despacho, None)
 
     return fila_creada
 
 
-@app.post("/pipeline/{id_despacho}/ejecutar-completo", response_model=PipelineResultOut)
-def ejecutar_pipeline_completo(
+@app.post("/despachos/{id_despacho}/enviar-a-clasificacion", response_model=PipelineResultOut)
+def enviar_a_clasificacion(
     id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_user)
 ) -> dict:
-    """Encadena validar -> clasificar -> generar-borrador en una sola
-    llamada, para usar despues de subir los 4 documentos del despacho."""
+    """Accion del especialista: encadena validar -> clasificar ->
+    generar-borrador y mueve el despacho a estado CLASIFICACION, listo
+    para que el liquidador lo revise."""
+    _requiere_rol(usuario, {"ESPECIALISTA"})
+
     admin = get_supabase_admin_client()
-    despacho = _obtener_despacho_o_404(admin, id_despacho)
+    _obtener_despacho_o_404(admin, id_despacho)
 
     validaciones = _ejecutar_validacion(admin, id_despacho)
     clasificacion = _ejecutar_clasificacion(admin, id_despacho)
     borrador = _ejecutar_generacion_borrador(admin, id_despacho)
 
+    _actualizar_estado_despacho(admin, id_despacho, "CLASIFICACION")
     despacho_actualizado = _obtener_despacho_o_404(admin, id_despacho)
 
     return {

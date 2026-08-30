@@ -24,13 +24,17 @@ create table public.perfiles_especialista (
     id              uuid primary key references auth.users(id) on delete cascade,
     nombre_completo text not null,
     rol             text not null default 'ESPECIALISTA'
-                        check (rol in ('ESPECIALISTA', 'ADMIN')),
+                        check (rol in ('ESPECIALISTA', 'LIQUIDADOR', 'ADMIN')),
     activo          boolean not null default true,
     creado_en       timestamptz not null default now()
 );
 
 comment on table public.perfiles_especialista is
     'Datos de negocio de cada especialista aduanero que usa el dashboard. 1:1 con auth.users.';
+comment on column public.perfiles_especialista.rol is
+    'ESPECIALISTA: sube y valida documentos, envia el despacho a clasificacion. '
+    'LIQUIDADOR: revisa la propuesta de subpartida y la acepta u observa. '
+    'ADMIN: puede realizar cualquier accion de los dos roles anteriores.';
 
 -- Funcion + trigger: al crear un usuario en auth.users, crea su perfil
 -- automaticamente. El nombre completo se toma de raw_user_meta_data si
@@ -73,16 +77,12 @@ create table public.despachos (
     id              uuid primary key default gen_random_uuid(),
     numero_despacho text not null unique,
     cliente         text not null,
-    estado          text not null default 'PENDIENTE_DOCUMENTOS'
+    estado          text not null default 'REVISION_DOC'
                         check (estado in (
-                            'PENDIENTE_DOCUMENTOS',
-                            'EXTRAYENDO',
-                            'VALIDADO_CON_ALERTAS',
-                            'VALIDADO_OK',
-                            'CLASIFICADO_IA',
-                            'APROBADO',
-                            'CORREGIDO',
-                            'ERROR'
+                            'REVISION_DOC',
+                            'CLASIFICACION',
+                            'REVISADO',
+                            'OBSERVADO'
                         )),
     fecha_creacion  timestamptz not null default now(),
     creado_por      uuid references public.perfiles_especialista(id),
@@ -92,9 +92,11 @@ create table public.despachos (
 create index despachos_creado_por_idx on public.despachos (creado_por);
 
 comment on column public.despachos.estado is
-    'Maquina de estados del pipeline: PENDIENTE_DOCUMENTOS -> EXTRAYENDO -> '
-    'VALIDADO_OK|VALIDADO_CON_ALERTAS -> CLASIFICADO_IA -> APROBADO|CORREGIDO. '
-    'ERROR es alcanzable desde cualquier paso si la extraccion o clasificacion falla.';
+    'Maquina de estados del flujo de negocio: REVISION_DOC (subida y validacion '
+    'de documentos, a cargo del especialista) -> CLASIFICACION (el especialista '
+    'envio el despacho a clasificar; se genera la propuesta IA) -> REVISADO '
+    '(el liquidador acepto la propuesta tal cual) u OBSERVADO (el liquidador la '
+    'rechazo/corrigio, con motivo obligatorio).';
 
 
 -- ---------------------------------------------------------------------
