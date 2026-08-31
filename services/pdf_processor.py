@@ -1,6 +1,6 @@
 """
-Extraccion de datos estructurados desde los 4 tipos de documentos de un
-despacho (FACTURA, SEGURO, SWIFT_BANCARIO, BL).
+Extraccion de datos estructurados desde los tipos de documentos de un
+despacho (FACTURA, SEGURO, SWIFT_BANCARIO, BL, PACKING_LIST).
 
 Estrategia de dos pasos:
 1. PyMuPDF (fitz) extrae el texto crudo del PDF (rapido, gratis, sin
@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 
 from app.config import GEMINI_MODEL_TEXTO_Y_VISION, get_genai_client
 
-TipoDocumento = Literal["FACTURA", "SEGURO", "SWIFT_BANCARIO", "BL"]
+TipoDocumento = Literal["FACTURA", "SEGURO", "SWIFT_BANCARIO", "BL", "PACKING_LIST"]
 
 # Longitud minima de texto (en caracteres, ya sin espacios) para considerar
 # que PyMuPDF logro extraer una capa de texto util del PDF.
@@ -121,11 +121,39 @@ class BLSchema(BaseModel):
     descripcion_mercancia: str | None = None
 
 
+class PackingListItem(BaseModel):
+    """Una linea de detalle dentro del packing list."""
+
+    descripcion: str
+    cantidad: float
+    unidad_medida: str | None = None
+    peso_neto_kg: float | None = None
+    peso_bruto_kg: float | None = None
+    cantidad_bultos: int | None = None
+
+
+class PackingListSchema(BaseModel):
+    """Packing List / Lista de empaque."""
+
+    numero_packing_list: str | None = None
+    vendedor_exportador: str | None = None
+    comprador_consignatario: str | None = None
+    fecha_emision: date | None = None
+    peso_bruto_kg: float | None = None
+    peso_neto_kg: float | None = None
+    cantidad_bultos: int | None = None
+    tipo_embalaje: str | None = Field(default=None, description="Ej: cajas, pallets, bultos sueltos")
+    marcas_numeros: str | None = Field(default=None, description="Shipping marks / marcas de los bultos")
+    descripcion_mercancia: str | None = None
+    items: list[PackingListItem] = Field(default_factory=list)
+
+
 TIPO_A_SCHEMA: dict[TipoDocumento, Type[BaseModel]] = {
     "FACTURA": FacturaSchema,
     "SEGURO": SeguroSchema,
     "SWIFT_BANCARIO": SwiftSchema,
     "BL": BLSchema,
+    "PACKING_LIST": PackingListSchema,
 }
 
 _NOMBRE_DOCUMENTO_LEGIBLE: dict[TipoDocumento, str] = {
@@ -133,6 +161,7 @@ _NOMBRE_DOCUMENTO_LEGIBLE: dict[TipoDocumento, str] = {
     "SEGURO": "Poliza / Aplicacion de Seguro de carga",
     "SWIFT_BANCARIO": "Comprobante de transferencia bancaria SWIFT",
     "BL": "Bill of Lading (conocimiento de embarque)",
+    "PACKING_LIST": "Packing List / Lista de empaque",
 }
 
 

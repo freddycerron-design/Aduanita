@@ -114,7 +114,7 @@ create table public.documentos_extraidos (
     id                   uuid primary key default gen_random_uuid(),
     id_despacho          uuid not null references public.despachos(id) on delete cascade,
     tipo_documento       text not null
-                             check (tipo_documento in ('FACTURA', 'SEGURO', 'SWIFT_BANCARIO', 'BL')),
+                             check (tipo_documento in ('FACTURA', 'SEGURO', 'SWIFT_BANCARIO', 'BL', 'PACKING_LIST')),
     contenido_json       jsonb not null default '{}'::jsonb,
     url_pdf_storage      text not null,
     metodo_extraccion    text
@@ -371,10 +371,10 @@ create table public.reglas_validacion (
     descripcion                 text,
     activo                      boolean not null default true,
     documento_a                 text not null
-                                    check (documento_a in ('FACTURA', 'SEGURO', 'SWIFT_BANCARIO', 'BL')),
+                                    check (documento_a in ('FACTURA', 'SEGURO', 'SWIFT_BANCARIO', 'BL', 'PACKING_LIST')),
     campo_a                     text not null,
     documento_b                 text not null
-                                    check (documento_b in ('FACTURA', 'SEGURO', 'SWIFT_BANCARIO', 'BL')),
+                                    check (documento_b in ('FACTURA', 'SEGURO', 'SWIFT_BANCARIO', 'BL', 'PACKING_LIST')),
     campo_b                     text not null,
     campo_moneda_a              text,
     campo_moneda_b              text,
