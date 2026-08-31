@@ -1,0 +1,96 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* ---------------------------------------------------------------------
+ * Paleta "EstimaDORA": fondo azul marino casi negro, tarjetas en un azul
+ * marino apenas mas claro, acento coral/naranja. AduANITA adopta este
+ * tema deliberadamente (app hermana) y lo mantiene fijo -- no hay modo
+ * claro, es una herramienta interna de uso diario para un equipo
+ * pequeno, no un producto publico que deba respetar el tema del sistema.
+ *
+ * Los tokens con prefijo --color-* quedan disponibles como utilidades de
+ * Tailwind automaticamente (bg-coral, text-texto-secundario, etc.) y
+ * tambien soportan modificadores de opacidad (bg-coral/10) via el motor
+ * de color de Tailwind v4. Ademas se exponen alias semanticos al estilo
+ * shadcn/ui (background, foreground, primary, destructive...) para que
+ * los primitivos de src/components/ui usen nombres idiomaticos.
+ * ------------------------------------------------------------------- */
+@theme {
+  --color-bg: #10141c;
+  --color-surface: #171b2c;
+  --color-surface-border: #262b40;
+  --color-coral: #e2583e;
+  --color-indigo: #2e2f5c;
+  --color-amber: #e0a83e;
+  --color-verde: #3fa36b;
+  --color-rojo: #df4c3a;
+  --color-texto: #f4f5f7;
+  --color-texto-secundario: #93a0b4;
+
+  /* Alias shadcn/ui, mapeados sobre la misma paleta */
+  --color-background: var(--color-bg);
+  --color-foreground: var(--color-texto);
+  --color-card: var(--color-surface);
+  --color-card-foreground: var(--color-texto);
+  --color-popover: var(--color-surface);
+  --color-popover-foreground: var(--color-texto);
+  --color-border: var(--color-surface-border);
+  --color-input: var(--color-surface-border);
+  --color-ring: var(--color-coral);
+  --color-primary: var(--color-coral);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: var(--color-indigo);
+  --color-secondary-foreground: var(--color-texto);
+  --color-muted: var(--color-surface);
+  --color-muted-foreground: var(--color-texto-secundario);
+  --color-accent: var(--color-surface-border);
+  --color-accent-foreground: var(--color-texto);
+  --color-destructive: var(--color-rojo);
+  --color-destructive-foreground: #ffffff;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  --radius-badge: 999px;
+
+  /* Animacion de apertura/cierre del Accordion (Radix expone la altura
+   * real del contenido en esta variable CSS mientras anima). */
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+}
+
+@keyframes accordion-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-accordion-content-height);
+  }
+}
+@keyframes accordion-up {
+  from {
+    height: var(--radix-accordion-content-height);
+  }
+  to {
+    height: 0;
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+  }
+  ::selection {
+    background-color: color-mix(in oklab, var(--color-coral) 35%, transparent);
+  }
+}
