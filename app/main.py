@@ -6,10 +6,14 @@ Maquina de estados del despacho (4 estados, dos roles distintos):
   REVISION_DOC -> CLASIFICACION -> REVISADO | OBSERVADO
 
   1. POST /despachos                                       -> crear despacho (estado=REVISION_DOC)
-  2. POST /despachos/{id}/documentos  (x2 minimo: FACTURA+BL) -> subir y extraer cada PDF
-  3. POST /despachos/{id}/validar                          -> validaciones cruzadas (no cambia estado)
-  4. POST /despachos/{id}/enviar-a-clasificacion            -> ESPECIALISTA: valida + clasifica (RAG+Gemini)
-                                                                 + genera borrador -> estado=CLASIFICACION
+  2. POST /despachos/{id}/documentos  (x2 minimo: FACTURA+BL) -> subir cada PDF (RAPIDO: solo
+                                                                 guarda el archivo, no llama a Gemini)
+  3. DELETE /despachos/{id}/documentos/{tipo}               -> quitar un documento ya cargado (opcional;
+                                                                 subir uno nuevo del mismo tipo tambien lo reemplaza)
+  4. POST /despachos/{id}/enviar-a-clasificacion            -> ESPECIALISTA, boton "Procesar informacion":
+                                                                 extrae (Gemini) los documentos pendientes +
+                                                                 valida + clasifica (RAG+Gemini) + genera
+                                                                 borrador -> estado=CLASIFICACION, desatendido
   5. (el liquidador revisa la propuesta en el dashboard)
   6. POST /despachos/{id}/decision                         -> LIQUIDADOR: acepta (REVISADO) u observa
                                                                  (OBSERVADO, con motivo) -> feedback al RAG
@@ -37,7 +41,7 @@ from services.email_draft_service import (
     guardar_borrador,
 )
 from services.gemini_classifier import PropuestaClasificacion, clasificar
-from services.pdf_processor import TIPO_A_SCHEMA, ExtraccionFallidaError, TipoDocumento, procesar_documento
+from services.pdf_processor import TIPO_A_SCHEMA, TipoDocumento, procesar_documento
 from services.rag_service import buscar_antecedentes, guardar_feedback
 from services.validation_engine import (
     ResultadoValidacion,
@@ -148,7 +152,10 @@ class DocumentoExtraidoOut(BaseModel):
     tipo_documento: TipoDocumento
     contenido_json: dict
     url_pdf_storage: str
-    metodo_extraccion: str
+    # Ambos quedan en None/False mientras el documento esta subido pero
+    # todavia no se proceso (ver _ejecutar_extraccion_pendiente).
+    metodo_extraccion: str | None = None
+    procesado: bool = False
     confianza_extraccion: float | None = None
 
 
@@ -239,13 +246,57 @@ def _obtener_documentos_extraidos(admin: Client, id_despacho: str) -> list[dict]
 def _documentos_a_modelos(filas: list[dict]) -> dict[TipoDocumento, BaseModel]:
     """Reconstruye los objetos Pydantic (FacturaSchema, BLSchema, etc.) a
     partir del contenido_json ya persistido, para reutilizarlos en las
-    validaciones y en la clasificacion sin volver a llamar a Gemini."""
+    validaciones y en la clasificacion sin volver a llamar a Gemini.
+
+    Los documentos subidos pero aun no procesados (procesado=False,
+    contenido_json='{}') se omiten -- para validar/clasificar se tratan
+    igual que si no se hubieran cargado todavia.
+    """
     documentos: dict[TipoDocumento, BaseModel] = {}
     for fila in filas:
+        if not fila.get("procesado"):
+            continue
         tipo: TipoDocumento = fila["tipo_documento"]
         schema = TIPO_A_SCHEMA[tipo]
         documentos[tipo] = schema.model_validate(fila["contenido_json"])
     return documentos
+
+
+def _ejecutar_extraccion_pendiente(admin: Client, id_despacho: str) -> None:
+    """Extrae con Gemini el contenido_json de todos los documentos
+    subidos pero aun no procesados de este despacho (procesado=False).
+
+    Es el primer paso de "Procesar informacion": si falla la extraccion
+    de un documento REQUERIDO (FACTURA o BL), aborta con 422 y ninguno de
+    los pasos siguientes (validar/clasificar) se ejecuta. Si falla un
+    documento opcional (SEGURO/SWIFT_BANCARIO), se omite y se continua --
+    ese documento simplemente sigue apareciendo como no procesado.
+    """
+    filas = _obtener_documentos_extraidos(admin, id_despacho)
+    pendientes = [f for f in filas if not f.get("procesado")]
+    errores_criticos: list[str] = []
+
+    for fila in pendientes:
+        tipo: TipoDocumento = fila["tipo_documento"]
+        try:
+            pdf_bytes = admin.storage.from_(settings.supabase_storage_bucket).download(fila["url_pdf_storage"])
+            modelo, metodo_extraccion = procesar_documento(pdf_bytes, tipo)
+        except Exception as error:  # ExtraccionFallidaError u otro error de red/API
+            if tipo in ("FACTURA", "BL"):
+                errores_criticos.append(f"{tipo}: {error}")
+            continue
+
+        admin.table("documentos_extraidos").update({
+            "contenido_json": modelo.model_dump(mode="json"),
+            "metodo_extraccion": metodo_extraccion,
+            "procesado": True,
+        }).eq("id_despacho", id_despacho).eq("tipo_documento", tipo).execute()
+
+    if errores_criticos:
+        raise HTTPException(
+            status_code=422,
+            detail="No se pudo extraer informacion de documentos requeridos: " + "; ".join(errores_criticos),
+        )
 
 
 def _obtener_validaciones(admin: Client, id_despacho: str) -> list[ResultadoValidacion]:
@@ -409,6 +460,12 @@ def subir_documento(
     archivo: UploadFile = File(...),
     usuario: UsuarioAutenticado = Depends(get_current_user),
 ) -> dict:
+    """Sube el PDF a Storage y registra un marcador 'pendiente de procesar'
+    -- NO llama a Gemini aqui (por eso es rapida). La extraccion real se
+    hace en bloque, para todos los documentos pendientes del despacho a la
+    vez, al presionar "Procesar informacion" (ver enviar_a_clasificacion /
+    _ejecutar_extraccion_pendiente). Si ya existia un documento de este
+    tipo, subir uno nuevo lo reemplaza automaticamente (upsert)."""
     admin = get_supabase_admin_client()
     _obtener_despacho_o_404(admin, id_despacho)  # 404 si el despacho no existe
 
@@ -419,15 +476,6 @@ def subir_documento(
     if not pdf_bytes:
         raise HTTPException(status_code=400, detail="El archivo subido esta vacio.")
 
-    try:
-        modelo, metodo_extraccion = procesar_documento(pdf_bytes, tipo_documento)
-    except ExtraccionFallidaError as error:
-        # La nueva maquina de estados no tiene un estado ERROR propio: el
-        # despacho se queda en REVISION_DOC y el 422 es la senal de que
-        # este documento en particular no se pudo procesar (el especialista
-        # puede reintentar subiendo el mismo PDF u otro).
-        raise HTTPException(status_code=422, detail=str(error)) from error
-
     path_storage = f"{id_despacho}/{tipo_documento}.pdf"
     admin.storage.from_(settings.supabase_storage_bucket).upload(
         path_storage, pdf_bytes, {"content-type": "application/pdf", "upsert": "true"}
@@ -436,17 +484,45 @@ def subir_documento(
     fila = {
         "id_despacho": id_despacho,
         "tipo_documento": tipo_documento,
-        "contenido_json": modelo.model_dump(mode="json"),
+        "contenido_json": {},
         "url_pdf_storage": path_storage,
-        "metodo_extraccion": metodo_extraccion,
+        "metodo_extraccion": None,
+        "procesado": False,
     }
     respuesta = admin.table("documentos_extraidos").upsert(
         fila, on_conflict="id_despacho,tipo_documento"
     ).execute()
 
     # Subir un documento no mueve el estado del despacho: se queda en
-    # REVISION_DOC hasta que el especialista lo envie a clasificar.
+    # REVISION_DOC hasta que el especialista presione "Procesar informacion".
     return respuesta.data[0]
+
+
+@app.delete("/despachos/{id_despacho}/documentos/{tipo_documento}")
+def eliminar_documento(
+    id_despacho: str,
+    tipo_documento: TipoDocumento,
+    usuario: UsuarioAutenticado = Depends(get_current_user),
+) -> dict:
+    """Elimina un documento ya cargado (PDF en Storage + fila en
+    documentos_extraidos), para que el especialista pueda quitarlo antes de
+    volver a cargar uno distinto. No es estrictamente necesario para
+    reemplazar un documento (subir uno nuevo del mismo tipo ya lo
+    sobrescribe via upsert), pero permite quitarlo sin cargar otro."""
+    admin = get_supabase_admin_client()
+    _obtener_despacho_o_404(admin, id_despacho)
+
+    path_storage = f"{id_despacho}/{tipo_documento}.pdf"
+    try:
+        admin.storage.from_(settings.supabase_storage_bucket).remove([path_storage])
+    except Exception:
+        pass  # si el archivo ya no existia en Storage, no es un error
+
+    admin.table("documentos_extraidos").delete().eq("id_despacho", id_despacho).eq(
+        "tipo_documento", tipo_documento
+    ).execute()
+
+    return {"status": "ok"}
 
 
 @app.post("/despachos/{id_despacho}/validar", response_model=list[ResultadoValidacionOut])
@@ -538,14 +614,17 @@ def registrar_decision(
 def enviar_a_clasificacion(
     id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_user)
 ) -> dict:
-    """Accion del especialista: encadena validar -> clasificar ->
-    generar-borrador y mueve el despacho a estado CLASIFICACION, listo
-    para que el liquidador lo revise."""
+    """Accion del especialista ("Procesar informacion"): extrae con Gemini
+    los documentos pendientes -> valida -> clasifica -> genera-borrador, y
+    mueve el despacho a estado CLASIFICACION, listo para que el liquidador
+    lo revise. Es el unico punto donde se llama a Gemini para extraccion:
+    subir_documento solo guarda el PDF (rapido, sin extraer)."""
     _requiere_rol(usuario, {"ESPECIALISTA"})
 
     admin = get_supabase_admin_client()
     _obtener_despacho_o_404(admin, id_despacho)
 
+    _ejecutar_extraccion_pendiente(admin, id_despacho)
     validaciones = _ejecutar_validacion(admin, id_despacho)
     clasificacion = _ejecutar_clasificacion(admin, id_despacho)
     borrador = _ejecutar_generacion_borrador(admin, id_despacho)

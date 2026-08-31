@@ -104,15 +104,22 @@ comment on column public.despachos.estado is
 -- ---------------------------------------------------------------------
 -- Resultado estructurado (JSON validado contra un schema Pydantic) de
 -- cada uno de los 4 documentos de un despacho.
+--
+-- La carga del PDF (subir_documento) y la extraccion con Gemini
+-- (_ejecutar_extraccion_pendiente) son dos pasos separados: al subir, se
+-- crea la fila con contenido_json='{}' y procesado=false (rapido, sin
+-- llamar a Gemini); al presionar "Procesar informacion" se extrae el
+-- contenido real en bloque para todos los documentos pendientes.
 create table public.documentos_extraidos (
     id                   uuid primary key default gen_random_uuid(),
     id_despacho          uuid not null references public.despachos(id) on delete cascade,
     tipo_documento       text not null
                              check (tipo_documento in ('FACTURA', 'SEGURO', 'SWIFT_BANCARIO', 'BL')),
-    contenido_json       jsonb not null,
+    contenido_json       jsonb not null default '{}'::jsonb,
     url_pdf_storage      text not null,
-    metodo_extraccion    text not null default 'PYMUPDF'
+    metodo_extraccion    text
                              check (metodo_extraccion in ('PYMUPDF', 'GEMINI_VISION')),
+    procesado            boolean not null default false,
     confianza_extraccion float,
     creado_en            timestamptz not null default now(),
     -- MVP: un solo documento de cada tipo por despacho (sin BL master+house,
@@ -121,10 +128,14 @@ create table public.documentos_extraidos (
 );
 
 comment on column public.documentos_extraidos.contenido_json is
-    'Salida ya validada contra FacturaSchema / SeguroSchema / SwiftSchema / BLSchema (services/pdf_processor.py).';
+    'Salida ya validada contra FacturaSchema / SeguroSchema / SwiftSchema / BLSchema (services/pdf_processor.py). '
+    'Vacio ({}) mientras procesado=false.';
 comment on column public.documentos_extraidos.metodo_extraccion is
     'PYMUPDF si el texto se extrajo y estructuro directamente; GEMINI_VISION si el PDF '
-    'era un escaneado y se uso el fallback de vision.';
+    'era un escaneado y se uso el fallback de vision. NULL mientras procesado=false.';
+comment on column public.documentos_extraidos.procesado is
+    'true una vez que se extrajo el contenido_json real; false mientras el PDF '
+    'esta subido pero pendiente de extraccion.';
 
 
 -- ---------------------------------------------------------------------

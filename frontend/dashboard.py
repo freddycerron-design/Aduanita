@@ -214,6 +214,28 @@ h1, h2, h3, h4, h5 {
     font-size: 0.95rem;
 }
 
+/* Numeros de orden en las pestanas del contenido principal (circulo
+   naranja, numero blanco) -- se dibujan con ::before sobre los botones
+   de pestana de BaseWeb, no se puede inyectar HTML dentro del label de
+   st.tabs directamente. */
+[data-testid="stTabs"] [data-baseweb="tab-list"] button::before {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    margin-right: 0.4rem;
+    border-radius: 50%;
+    background: var(--coral);
+    color: #ffffff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    vertical-align: middle;
+}
+[data-testid="stTabs"] [data-baseweb="tab-list"] button:nth-of-type(1)::before { content: "1"; }
+[data-testid="stTabs"] [data-baseweb="tab-list"] button:nth-of-type(2)::before { content: "2"; }
+[data-testid="stTabs"] [data-baseweb="tab-list"] button:nth-of-type(3)::before { content: "3"; }
+
 /* Badge de rol en el panel de cuenta */
 .rol-badge {
     display: inline-block;
@@ -296,6 +318,10 @@ def api_post(path: str, json_body: dict | None = None, files=None, data=None) ->
 
 def api_patch(path: str, json_body: dict) -> dict | list | None:
     return _peticion("PATCH", path, json=json_body)
+
+
+def api_delete(path: str) -> dict | list | None:
+    return _peticion("DELETE", path)
 
 
 def obtener_pdf_bytes(path_storage: str) -> bytes | None:
@@ -481,50 +507,80 @@ clasificacion = detalle.get("clasificacion")
 borrador = detalle.get("borrador")
 documentos_minimos_ok = {"FACTURA", "BL"}.issubset(documentos_por_tipo.keys())
 
-tab_revision, tab_clasificacion, tab_correo = st.tabs(
-    ["📋 Revisión", "🏷️ Clasificación", "✉️ Correo"]
-)
+tab_revision, tab_clasificacion, tab_correo = st.tabs(["Revisión", "Clasificación", "Correo"])
 
 # --- Tab 1: carga de documentos + discrepancias (mitad superior) y  --------
 # --- visor JSON/PDF elegido por el usuario (mitad inferior) ----------------
 with tab_revision:
     with st.container(height=430, border=False):
         st.markdown("##### 📤 Documentos")
-        st.caption("Selecciona el PDF de cada tipo: la extraccion arranca sola, sin boton adicional.")
+        st.caption(
+            "Cargar solo sube el PDF (rapido, sin extraer datos todavia). Cuando termines, presiona "
+            "'Procesar información' para extraer, validar y clasificar todo de una vez."
+        )
         columnas = st.columns(4)
         for columna, tipo in zip(columnas, TIPOS_DOCUMENTO):
             with columna:
-                cargado = tipo in documentos_por_tipo
-                st.markdown(f"**{tipo}** {'✅' if cargado else '⬜'}")
+                doc_actual = documentos_por_tipo.get(tipo)
+                cargado = doc_actual is not None
+                procesado = bool(doc_actual and doc_actual.get("procesado"))
+                icono = "✅" if procesado else ("📄" if cargado else "⬜")
+                st.markdown(f"**{tipo}** {icono}")
+
                 archivo = st.file_uploader(
                     f"PDF {tipo}", type="pdf", key=f"upload_{tipo}", label_visibility="collapsed"
                 )
 
-                def _subir(tipo=tipo, archivo=archivo) -> None:
-                    with st.spinner(f"Extrayendo datos de {tipo}..."):
-                        resultado = api_post(
-                            f"/despachos/{id_despacho}/documentos",
-                            data={"tipo_documento": tipo},
-                            files={"archivo": (archivo.name, archivo.getvalue(), "application/pdf")},
-                        )
-                    if resultado:
-                        st.success(f"{tipo} procesado correctamente.")
+                if archivo is not None:
+                    # Se sube en cuanto se selecciona un archivo, sea la
+                    # primera carga o un reemplazo (el backend hace upsert,
+                    # asi que un PDF nuevo del mismo tipo sobrescribe al
+                    # anterior sin necesidad de eliminarlo primero). Se usa
+                    # el file_id para no volver a subir el mismo archivo en
+                    # cada rerun posterior mientras siga seleccionado.
+                    clave_ultimo_subido = f"ultimo_subido_{tipo}"
+                    if st.session_state.get(clave_ultimo_subido) != archivo.file_id:
+                        with st.spinner(f"Subiendo {tipo}..."):
+                            resultado = api_post(
+                                f"/despachos/{id_despacho}/documentos",
+                                data={"tipo_documento": tipo},
+                                files={"archivo": (archivo.name, archivo.getvalue(), "application/pdf")},
+                            )
+                        if resultado:
+                            st.session_state[clave_ultimo_subido] = archivo.file_id
+                            st.success(f"{tipo} cargado.")
+                            st.rerun()
+
+                if cargado and st.button(f"🗑️ Eliminar", key=f"btn_delete_{tipo}", use_container_width=True):
+                    if api_delete(f"/despachos/{id_despacho}/documentos/{tipo}") is not None:
+                        st.session_state.pop(f"ultimo_subido_{tipo}", None)
                         st.rerun()
 
-                if archivo is not None and not cargado:
-                    # Un solo paso: en cuanto se selecciona el archivo, se
-                    # sube y procesa automaticamente (sin boton extra).
-                    _subir()
-                elif archivo is not None and cargado:
-                    if st.button(f"🔁 Reemplazar {tipo}", key=f"btn_replace_{tipo}"):
-                        _subir()
+        st.divider()
+        if estado_actual != "REVISION_DOC":
+            st.caption(f"Este despacho ya fue procesado (estado actual: {estado_actual}).")
+        elif not PUEDE_ENVIAR_A_CLASIFICACION:
+            st.caption("Solo un especialista puede procesar este despacho.")
+        else:
+            if st.button(
+                "⚙️ Procesar información",
+                type="primary",
+                use_container_width=True,
+                disabled=not documentos_minimos_ok,
+                help=None if documentos_minimos_ok else "Carga al menos Factura y BL primero.",
+            ):
+                with st.spinner("Extrayendo datos, validando y clasificando... puede tardar unos segundos por documento."):
+                    resultado = api_post(f"/despachos/{id_despacho}/enviar-a-clasificacion")
+                if resultado:
+                    st.success("Procesamiento completo. Revisa la pestaña Clasificación.")
+                    st.rerun()
 
         st.divider()
         st.markdown("##### 🔍 Discrepancias")
         if not documentos_minimos_ok:
             st.info("Carga al menos Factura y BL para poder validar (Seguro y SWIFT son opcionales).")
         elif not validaciones:
-            st.caption("Aun no se ha ejecutado la validacion. Se ejecuta automaticamente al enviar a clasificacion.")
+            st.caption("Aun no se ha ejecutado la validacion. Se genera al presionar 'Procesar información'.")
         else:
             # regla es un identificador fijo (services/validation_engine.py);
             # el detalle interpola texto extraido por Gemini -> se escapa.
@@ -550,6 +606,8 @@ with tab_revision:
     doc_visor = documentos_por_tipo.get(tipo_visor)
     if not doc_visor:
         st.info(f"Aun no se ha cargado el documento {tipo_visor}.")
+    elif modo_visor == "JSON" and not doc_visor.get("procesado"):
+        st.info(f"{tipo_visor} esta cargado pero aun no procesado. Presiona 'Procesar información' para extraer sus datos.")
     elif modo_visor == "JSON":
         metodo = doc_visor["metodo_extraccion"]
         icono = "🔎 OCR/Vision (PDF escaneado)" if metodo == "GEMINI_VISION" else "📝 Texto digital"
@@ -577,21 +635,10 @@ with tab_clasificacion:
     decision = detalle.get("decision")
 
     if estado_actual == "REVISION_DOC":
-        st.info("Este despacho aun no fue enviado a clasificacion.")
-        if PUEDE_ENVIAR_A_CLASIFICACION:
-            if st.button(
-                "📤 Enviar a Clasificación",
-                type="primary",
-                disabled=not documentos_minimos_ok,
-                help=None if documentos_minimos_ok else "Carga al menos Factura y BL primero.",
-            ):
-                with st.spinner("Validando documentos y generando la propuesta de clasificacion..."):
-                    resultado = api_post(f"/despachos/{id_despacho}/enviar-a-clasificacion")
-                if resultado:
-                    st.success("Despacho enviado a clasificacion.")
-                    st.rerun()
-        else:
-            st.caption("Solo un especialista puede enviar este despacho a clasificacion.")
+        st.info(
+            "Este despacho aun no fue procesado. Carga los documentos y presiona "
+            "'⚙️ Procesar información' en la pestaña **① Revisión** para generar la propuesta de clasificacion."
+        )
 
     elif estado_actual in ("REVISADO", "OBSERVADO"):
         # Despacho ya cerrado: la fuente de verdad es la decision persistida
