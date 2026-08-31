@@ -23,7 +23,15 @@ class Settings(BaseSettings):
     supabase_service_role_key: str
     supabase_storage_bucket: str = "documentos-aduaneros"
     gemini_api_key: str
-    cors_origin: str = "http://localhost:8501"
+    # Uno o mas origenes separados por coma (el frontend Streamlit y, desde
+    # la migracion a React, tambien el nuevo sitio -- conviven mientras se
+    # verifica el reemplazo, ver render.yaml). Un solo origen sin coma sigue
+    # funcionando igual que antes.
+    cors_origin: str = "http://localhost:8501,http://localhost:5173"
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [origen.strip() for origen in self.cors_origin.split(",") if origen.strip()]
 
 
 @lru_cache

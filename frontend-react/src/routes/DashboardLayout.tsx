@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Outlet, useMatch } from "react-router-dom";
 
-import logo from "@/assets/logo_aduanita.png";
+import logo from "@/assets/logo_aduanita.webp";
 import { AccountPanel } from "@/components/layout/AccountPanel";
 import { ExplorerPanel } from "@/components/layout/ExplorerPanel";
 import type { PanelLateral } from "@/components/layout/IconRail";

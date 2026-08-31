@@ -1,11 +1,21 @@
-# Blueprint de Render para desplegar el backend FastAPI y el dashboard
-# Streamlit como dos "Web Services" independientes.
+# Blueprint de Render para desplegar el backend FastAPI, el dashboard
+# Streamlit (en retiro, ver frontend-react/) y el nuevo frontend React
+# como tres servicios independientes.
 #
 # Uso: en Render Dashboard -> "New" -> "Blueprint" -> conectar este repo.
-# Render detecta este archivo y crea ambos servicios automaticamente.
+# Render detecta este archivo y crea los servicios automaticamente (un
+# servicio NUEVO agregado aqui puede requerir sincronizar el Blueprint a
+# mano desde el dashboard la primera vez, igual que la configuracion
+# inicial de los otros dos).
 #
 # Los env vars con "sync: false" NO se guardan en este archivo (ni en git):
 # Render pedira que los completes manualmente en su dashboard la primera vez.
+#
+# aduanita-frontend-react convive con aduanita-frontend (Streamlit)
+# mientras se verifica el reemplazo (ver plan de migracion) -- por eso
+# CORS_ORIGIN del backend lista ambos origenes. Cuando el nuevo frontend
+# quede verificado y aduanita-frontend se retire, achicar CORS_ORIGIN al
+# origen final unicamente.
 
 services:
   - type: web
@@ -26,10 +36,11 @@ services:
         value: documentos-aduaneros
       - key: GEMINI_API_KEY
         sync: false
-      # URL publica del servicio de frontend (ver mas abajo); se usa para
-      # el whitelist de CORS. Ajustar si cambias el "name" del frontend.
+      # Origenes permitidos para CORS, separados por coma -- el frontend
+      # Streamlit (en retiro) y el nuevo frontend React, mientras conviven.
+      # Ajustar si cambias el "name" de cualquiera de los dos.
       - key: CORS_ORIGIN
-        value: https://aduanita-frontend.onrender.com
+        value: https://aduanita-frontend.onrender.com,https://aduanita-frontend-react.onrender.com
 
   - type: web
     name: aduanita-frontend
@@ -48,4 +59,34 @@ services:
       # el dashboard sepa a donde llamar. Ajustar si cambias el "name"
       # del backend.
       - key: API_BASE_URL
+        value: https://aduanita-backend.onrender.com
+
+  # Nuevo frontend (React + Vite), en verificacion junto al Streamlit de
+  # arriba -- ver plan de migracion. Static Site: gratis, sin cold-start
+  # por inactividad (a diferencia de los dos servicios "web" de arriba).
+  - type: web
+    name: aduanita-frontend-react
+    runtime: static
+    rootDir: frontend-react
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      # SPA: cualquier ruta que no sea un archivo estatico real cae a
+      # index.html, para que React Router pueda resolverla del lado del
+      # cliente (si no, refrescar /despachos/xyz daria 404).
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      # Se incrustan en el bundle en BUILD time (Vite) -- si cambian hace
+      # falta un redeploy manual, no alcanza con solo editar el valor.
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+      - key: VITE_SUPABASE_STORAGE_BUCKET
+        value: documentos-aduaneros
+      # URL publica del backend (ver arriba). Ajustar si cambias el "name"
+      # del backend.
+      - key: VITE_API_BASE_URL
         value: https://aduanita-backend.onrender.com
