@@ -1,8 +1,16 @@
+import { useState } from "react";
 import { Loader2 } from "lucide-react";
 
+import { cn } from "@/lib/utils";
 import { puedeEnviarAClasificacion } from "@/lib/roles";
 import { TIPOS_DOCUMENTO } from "@/lib/types";
-import type { DocumentoExtraidoOut, EstadoDespacho, ResultadoValidacionOut, TipoDocumento } from "@/lib/types";
+import type {
+  DocumentoExtraidoOut,
+  EstadoDespacho,
+  ResultadoValidacionOut,
+  Severidad,
+  TipoDocumento,
+} from "@/lib/types";
 import { useProfile } from "@/hooks/useProfile";
 import { useEnviarAClasificacion } from "@/hooks/useEnviarAClasificacion";
 import { Button } from "@/components/ui/button";
@@ -11,7 +19,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DocumentUploadCard } from "@/components/documents/DocumentUploadCard";
 import { DocumentViewer } from "@/components/documents/DocumentViewer";
-import { LedgerRow } from "@/components/validations/LedgerRow";
+import { LedgerRow, SEVERIDAD_INFO } from "@/components/validations/LedgerRow";
 
 export interface RevisionTabProps {
   idDespacho: string;
@@ -29,6 +37,17 @@ export interface RevisionTabProps {
  * opcionales. */
 const DOCUMENTOS_MINIMOS: TipoDocumento[] = ["FACTURA", "BL"];
 
+const TODAS_SEVERIDADES: Severidad[] = ["ALTA", "MEDIA", "NINGUNA"];
+
+/** Clases literales (no interpoladas) para que el escaner de Tailwind las
+ * genere -- estilo de cada chip de filtro cuando esta activo, un color por
+ * severidad igual al de `SEVERIDAD_INFO`. */
+const FILTRO_ACTIVO_CLASES: Record<Severidad, string> = {
+  ALTA: "border-rojo/40 bg-rojo/15 text-rojo",
+  MEDIA: "border-amber/40 bg-amber/15 text-amber",
+  NINGUNA: "border-verde/40 bg-verde/15 text-verde",
+};
+
 /**
  * Pestaña "Revisión": carga de documentos, boton de procesamiento en
  * bloque, discrepancias de validacion y visor JSON/PDF. Ver
@@ -38,10 +57,23 @@ const DOCUMENTOS_MINIMOS: TipoDocumento[] = ["FACTURA", "BL"];
 export function RevisionTab({ idDespacho, estadoDespacho, documentos, validaciones, onProcesado }: RevisionTabProps) {
   const { data: perfil, isLoading: perfilCargando } = useProfile();
   const enviar = useEnviarAClasificacion(idDespacho);
+  // Filtro de severidad de los hallazgos -- arranca con las 3 activas (sin
+  // filtrar). Desmarcar una severidad reduce la lista, lo que achica esta
+  // seccion visualmente (no tiene un contenedor de altura fija ni scroll
+  // propio, fluye en la misma pagina que el visor de abajo) y deja mas
+  // espacio visible para el visor de documentos sin necesidad de scrollear.
+  const [filtroSeveridad, setFiltroSeveridad] = useState<Severidad[]>(TODAS_SEVERIDADES);
 
   const minimosOk = DOCUMENTOS_MINIMOS.every((tipo) => documentos.some((d) => d.tipo_documento === tipo));
   const puedeProcesar = puedeEnviarAClasificacion(perfil?.rol);
   const esEstadoRevision = estadoDespacho === "REVISION_DOC";
+  const validacionesFiltradas = validaciones.filter((v) => filtroSeveridad.includes(v.severidad));
+
+  function alternarFiltroSeveridad(severidad: Severidad) {
+    setFiltroSeveridad((actual) =>
+      actual.includes(severidad) ? actual.filter((s) => s !== severidad) : [...actual, severidad],
+    );
+  }
 
   async function manejarProcesar() {
     try {
@@ -102,7 +134,36 @@ export function RevisionTab({ idDespacho, estadoDespacho, documentos, validacion
       <Separator />
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-texto">Discrepancias</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-texto">Hallazgos de la revisión</h2>
+          {validaciones.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {TODAS_SEVERIDADES.map((severidad) => {
+                const { Icono } = SEVERIDAD_INFO[severidad];
+                const cantidad = validaciones.filter((v) => v.severidad === severidad).length;
+                const activo = filtroSeveridad.includes(severidad);
+                return (
+                  <button
+                    key={severidad}
+                    type="button"
+                    onClick={() => alternarFiltroSeveridad(severidad)}
+                    aria-pressed={activo}
+                    className={cn(
+                      "flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide transition-colors",
+                      activo
+                        ? FILTRO_ACTIVO_CLASES[severidad]
+                        : "border-border bg-surface text-texto-secundario opacity-60 hover:opacity-100",
+                    )}
+                  >
+                    <Icono className="size-3.5" />
+                    {severidad} ({cantidad})
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
         {!minimosOk ? (
           <Card>
             <CardContent className="pt-4 text-sm text-texto-secundario">
@@ -113,9 +174,11 @@ export function RevisionTab({ idDespacho, estadoDespacho, documentos, validacion
           <p className="text-sm text-texto-secundario">
             Aún no se ha ejecutado la validación. Se genera al presionar &quot;Procesar información&quot;.
           </p>
+        ) : validacionesFiltradas.length === 0 ? (
+          <p className="text-sm text-texto-secundario">No hay hallazgos con los filtros seleccionados.</p>
         ) : (
           <div className="flex flex-col gap-2">
-            {validaciones.map((resultado, indice) => (
+            {validacionesFiltradas.map((resultado, indice) => (
               <LedgerRow key={`${resultado.regla}-${indice}`} resultado={resultado} />
             ))}
           </div>

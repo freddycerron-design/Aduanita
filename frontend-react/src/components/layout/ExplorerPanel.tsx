@@ -106,15 +106,19 @@ export function ExplorerPanel({ idDespachoActivo }: ExplorerPanelProps) {
                             <button
                               type="button"
                               onClick={() => navigate(`/despachos/${d.id}`)}
+                              title={`${d.numero_despacho} · ${d.cliente}`}
                               className={cn(
-                                "flex w-full flex-col items-start gap-0.5 rounded-lg px-2.5 py-1.5 text-left transition-colors",
+                                "block w-full truncate rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors",
                                 d.id === idDespachoActivo
                                   ? "bg-coral/15 text-coral"
                                   : "text-texto hover:bg-surface-border/50",
                               )}
                             >
-                              <span className="w-full truncate font-mono text-sm">{d.numero_despacho}</span>
-                              <span className="w-full truncate text-xs text-texto-secundario">{d.cliente}</span>
+                              <span className="font-mono">{d.numero_despacho}</span>
+                              <span className={d.id === idDespachoActivo ? "text-coral/70" : "text-texto-secundario"}>
+                                {" "}
+                                · {d.cliente}
+                              </span>
                             </button>
                           </li>
                         ))}

@@ -6,7 +6,9 @@ import type { ResultadoValidacionOut, Severidad } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import type { BadgeProps } from "@/components/ui/badge";
 
-const SEVERIDAD_INFO: Record<
+/** Exportado para reusar el mismo mapeo de color/icono en los chips de
+ * filtro por severidad (ver RevisionTab). */
+export const SEVERIDAD_INFO: Record<
   Severidad,
   { variant: NonNullable<BadgeProps["variant"]>; borde: string; color: string; Icono: LucideIcon }
 > = {
