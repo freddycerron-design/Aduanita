@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils";
 export type PanelLateral = "archivos" | "cuenta";
 
 interface IconRailProps {
-  panelActivo: PanelLateral;
+  /** `null` = panel lateral colapsado (ningun icono resaltado). */
+  panelActivo: PanelLateral | null;
   onCambiarPanel: (panel: PanelLateral) => void;
 }
 
@@ -17,9 +18,11 @@ const ITEMS: Array<{ id: PanelLateral; icono: LucideIcon; etiqueta: string }> = 
 
 /**
  * Columna angosta tipo VSCode con los botones-icono que alternan el panel
- * lateral (Explorer de despachos / Cuenta). Se monta dentro de la columna
+ * lateral (Explorador de despachos / Cuenta). Se monta dentro de la columna
  * de rail que arma `DashboardLayout` (que ademas coloca el logo arriba) --
- * este componente solo resuelve la navegacion entre paneles.
+ * este componente solo reporta que icono se clickeo; es `DashboardLayout`
+ * quien decide colapsar el panel si se vuelve a clickear el icono ya
+ * activo (ver `alternarPanel`).
  */
 export function IconRail({ panelActivo, onCambiarPanel }: IconRailProps) {
   return (

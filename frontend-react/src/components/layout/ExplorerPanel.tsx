@@ -55,7 +55,7 @@ export function ExplorerPanel({ idDespachoActivo }: ExplorerPanelProps) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-col gap-3 border-b border-border p-3">
-        <h2 className="text-xs font-bold uppercase tracking-wide text-texto-secundario">Explorer</h2>
+        <h2 className="text-xs font-bold uppercase tracking-wide text-texto-secundario">Explorador</h2>
         <Button size="sm" className="w-full" onClick={() => setDialogoAbierto(true)}>
           <Plus className="size-4" />
           Nuevo despacho
