@@ -353,3 +353,74 @@ on conflict (id) do nothing;
 create policy "auth_select_storage_documentos"
     on storage.objects for select
     using (bucket_id = 'documentos-aduaneros' and (select auth.role()) = 'authenticated');
+
+
+-- ---------------------------------------------------------------------
+-- 10. reglas_validacion
+-- ---------------------------------------------------------------------
+-- Motor de reglas de validacion cruzada, configurable por un ADMIN sin
+-- tocar codigo Python (antes eran 5 funciones hardcodeadas en
+-- services/validation_engine.py). Cada fila define una comparacion entre
+-- un campo de un documento (documento_a/campo_a) y un campo de otro
+-- documento (documento_b/campo_b); services/validation_engine.py
+-- interpreta cada fila activa segun su tipo_comparacion.
+create table public.reglas_validacion (
+    id                          uuid primary key default gen_random_uuid(),
+    codigo                      text not null unique,
+    nombre                      text not null,
+    descripcion                 text,
+    activo                      boolean not null default true,
+    documento_a                 text not null
+                                    check (documento_a in ('FACTURA', 'SEGURO', 'SWIFT_BANCARIO', 'BL')),
+    campo_a                     text not null,
+    documento_b                 text not null
+                                    check (documento_b in ('FACTURA', 'SEGURO', 'SWIFT_BANCARIO', 'BL')),
+    campo_b                     text not null,
+    campo_moneda_a              text,
+    campo_moneda_b              text,
+    severidad_moneda_distinta   text check (severidad_moneda_distinta in ('ALTA', 'MEDIA', 'NINGUNA')),
+    severidad_dato_faltante     text not null check (severidad_dato_faltante in ('ALTA', 'MEDIA', 'NINGUNA')),
+    tipo_comparacion            text not null
+                                    check (tipo_comparacion in ('RANGO_ASIMETRICO', 'IGUALDAD_EXACTA', 'TEXTO_FUZZY')),
+    parametros                  jsonb not null default '{}'::jsonb,
+    creado_por                  uuid references public.perfiles_especialista(id),
+    creado_en                   timestamptz not null default now(),
+    actualizado_en              timestamptz not null default now(),
+    constraint reglas_validacion_moneda_par_completo
+        check ((campo_moneda_a is null) = (campo_moneda_b is null)),
+    constraint reglas_validacion_severidad_moneda_si_aplica
+        check (campo_moneda_a is null or severidad_moneda_distinta is not null)
+);
+
+create index reglas_validacion_activo_idx on public.reglas_validacion (activo);
+
+comment on table public.reglas_validacion is
+    'Reglas de validacion cruzada configurables por un ADMIN (antes eran funciones '
+    'Python hardcodeadas en services/validation_engine.py). documento_a/documento_b '
+    'y campo_a/campo_b se validan en la API contra TIPO_A_SCHEMA[...].model_fields '
+    '(services/pdf_processor.py) antes de insertar/actualizar -- la DB no puede validar '
+    'eso por si sola. codigo es lo que queda persistido en resultados_validacion.regla.';
+comment on column public.reglas_validacion.tipo_comparacion is
+    'RANGO_ASIMETRICO: numerico, compara (valor_b-valor_a)/max(|valor_a|,|valor_b|) contra '
+    'dos umbrales con severidad propia cada uno. parametros = {"umbral_inferior": float, '
+    '"severidad_inferior": Severidad, "umbral_superior": float, "severidad_superior": Severidad}. '
+    'IGUALDAD_EXACTA: compara valor_a==valor_b (numerico) o normalizado trim+upper (si texto); '
+    'parametros = {"severidad_si_distinto": Severidad, "normalizar_texto": bool}. '
+    'TEXTO_FUZZY: usa _normalizar_razon_social() fija (no configurable) + rapidfuzz.fuzz.ratio; '
+    'parametros = {"umbral_similitud": float (0-1), "severidad_si_distinto": Severidad}.';
+comment on column public.reglas_validacion.campo_moneda_a is
+    'Opcional. Si campo_moneda_a y campo_moneda_b estan seteados y las monedas leidas de esos '
+    'campos difieren (case-insensitive), la regla corta corto devolviendo severidad_moneda_distinta '
+    'sin evaluar la comparacion principal. Debe venir en pareja con campo_moneda_b (ver constraint).';
+comment on column public.reglas_validacion.severidad_dato_faltante is
+    'Severidad devuelta cuando falta el documento entero, o cuando el campo especifico viene '
+    'null/vacio en un documento que si esta presente.';
+
+alter table public.reglas_validacion enable row level security;
+
+-- Igual que el resto de tablas de pipeline (ver seccion 8): sin policies
+-- de insert/update/delete para "authenticated", solo el backend
+-- (service_role, gateado por _requiere_rol(usuario, set()) = solo ADMIN)
+-- escribe aqui.
+create policy "auth_select_reglas_validacion" on public.reglas_validacion
+    for select using ((select auth.role()) = 'authenticated');

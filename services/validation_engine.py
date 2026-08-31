@@ -1,10 +1,23 @@
 """
-Motor de validaciones cruzadas entre los 4 documentos de un despacho.
+Motor de validaciones cruzadas entre los documentos de un despacho.
 
-Compara Factura, Poliza de Seguro, SWIFT bancario y BL entre si para
-detectar discrepancias de peso, bultos, montos, consignatario e
-Incoterm, devolviendo una lista de `ResultadoValidacion` persistible en
-la tabla `resultados_validacion`.
+Antes (hasta antes de la migracion `reglas_validacion`) esto era 5
+funciones Python hardcodeadas, una por regla, cada una con su propia
+logica de comparacion y sus umbrales como constantes de modulo. Ahora es
+un motor generico: cada regla es una fila de la tabla `reglas_validacion`
+(administrable por un ADMIN via `app/main.py`, sin tocar codigo), y este
+archivo solo sabe interpretar 3 "tipos de comparacion" genericos contra
+los campos de 2 documentos cualesquiera.
+
+Los 3 tipos cubren, con distintos parametros, las 5 reglas originales:
+- RANGO_ASIMETRICO: numerico, compara una diferencia relativa SIGNADA
+  contra dos umbrales independientes (uno por direccion). Cubre peso
+  (tolerancia simetrica), monto-vs-SWIFT y valor-asegurado-vs-Factura
+  (ambas asimetricas, con severidades distintas segun el signo).
+- IGUALDAD_EXACTA: compara 2 valores (numericos o texto, con
+  normalizacion opcional). Cubre bultos e Incoterm.
+- TEXTO_FUZZY: normaliza razones sociales (sufijos societarios, tildes)
+  y compara similitud con rapidfuzz. Cubre consignatario.
 """
 from __future__ import annotations
 
@@ -14,19 +27,10 @@ from typing import Literal
 from pydantic import BaseModel
 from rapidfuzz import fuzz
 
-from services.pdf_processor import BLSchema, FacturaSchema, SeguroSchema, SwiftSchema, TipoDocumento
+from services.pdf_processor import FacturaSchema, TipoDocumento, _NOMBRE_DOCUMENTO_LEGIBLE
 
 Severidad = Literal["ALTA", "MEDIA", "NINGUNA"]
-
-# Tolerancia maxima permitida (1%) para considerar iguales dos pesos que
-# no coinciden exactamente (redondeos normales entre documentos).
-TOLERANCIA_PESO = 0.01
-# Umbral de similitud (0-1) por debajo del cual dos razones sociales se
-# consideran distintas en el chequeo estricto de consignatario.
-UMBRAL_SIMILITUD_CONSIGNATARIO = 0.9
-# Diferencia relativa maxima tolerada entre valor asegurado y monto de
-# factura antes de marcar la discrepancia como severidad ALTA en vez de MEDIA.
-UMBRAL_DIFERENCIA_SEGURO = 0.30
+TipoComparacion = Literal["RANGO_ASIMETRICO", "IGUALDAD_EXACTA", "TEXTO_FUZZY"]
 
 
 class ResultadoValidacion(BaseModel):
@@ -37,10 +41,53 @@ class ResultadoValidacion(BaseModel):
     valor_b: dict | None = None
 
 
+class ReglaValidacion(BaseModel):
+    """Espejo de una fila de `reglas_validacion`. `documento_a`/`documento_b`
+    y `campo_a`/`campo_b` ya se validaron en la API (contra
+    `TIPO_A_SCHEMA[...].model_fields`) al crear/editar la regla -- este
+    motor confia en que son validos y solo puede fallar en tiempo de
+    ejecucion si el dato del documento concreto no tiene ese atributo
+    (lo cual no deberia pasar si la validacion de escritura funciono)."""
+
+    id: str
+    codigo: str
+    nombre: str
+    descripcion: str | None = None
+    activo: bool
+    documento_a: TipoDocumento
+    campo_a: str
+    documento_b: TipoDocumento
+    campo_b: str
+    campo_moneda_a: str | None = None
+    campo_moneda_b: str | None = None
+    severidad_moneda_distinta: Severidad | None = None
+    severidad_dato_faltante: Severidad
+    tipo_comparacion: TipoComparacion
+    parametros: dict
+
+
+class ParametrosRangoAsimetrico(BaseModel):
+    umbral_inferior: float
+    severidad_inferior: Severidad
+    umbral_superior: float
+    severidad_superior: Severidad
+
+
+class ParametrosIgualdadExacta(BaseModel):
+    severidad_si_distinto: Severidad
+    normalizar_texto: bool = False
+
+
+class ParametrosTextoFuzzy(BaseModel):
+    umbral_similitud: float
+    severidad_si_distinto: Severidad
+
+
 def _normalizar_razon_social(texto: str) -> str:
     """Normaliza una razon social para comparacion difusa: mayusculas, sin
     tildes y sin sufijos societarios comunes que generan falsos positivos
-    (S.A.C. vs SAC vs Sociedad Anonima Cerrada)."""
+    (S.A.C. vs SAC vs Sociedad Anonima Cerrada). Logica de dominio fija
+    (Peru), no configurable por el admin."""
     texto_sin_tildes = "".join(
         c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c)
     )
@@ -54,295 +101,169 @@ def _normalizar_razon_social(texto: str) -> str:
     return " ".join(texto_normalizado.split())
 
 
-def _diferencia_relativa(a: float, b: float) -> float:
-    """Diferencia relativa entre dos numeros, tomando como base el mayor
-    de los dos para que la tolerancia sea simetrica."""
+def _diferencia_relativa_signada(a: float, b: float) -> float:
+    """Diferencia relativa SIGNADA de b respecto de a, tomando como base el
+    mayor de los dos en valor absoluto (para que un umbral simetrico de
+    tolerancia sea comparable en ambas direcciones). Positiva si b > a."""
     base = max(abs(a), abs(b))
     if base == 0:
         return 0.0
-    return abs(a - b) / base
+    return (b - a) / base
+
+
+def _es_dato_faltante(valor: object) -> bool:
+    if valor is None:
+        return True
+    if isinstance(valor, str) and not valor.strip():
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------
-# Reglas individuales
+# Aplicacion generica de una regla
 # ---------------------------------------------------------------------
 
-def validar_peso_bultos_factura_vs_bl(factura: FacturaSchema, bl: BLSchema) -> list[ResultadoValidacion]:
-    """Compara peso bruto (tolerancia 1%) y cantidad de bultos (exacta)
-    entre la Factura Comercial y el BL."""
-    resultados: list[ResultadoValidacion] = []
+def _aplicar_rango_asimetrico(
+    regla: ReglaValidacion, valor_a: float, valor_b: float, etiqueta_a: str, etiqueta_b: str
+) -> ResultadoValidacion:
+    p = ParametrosRangoAsimetrico.model_validate(regla.parametros)
+    diferencia = _diferencia_relativa_signada(valor_a, valor_b)
 
-    if factura.peso_bruto_kg is None or bl.peso_bruto_kg is None:
-        resultados.append(ResultadoValidacion(
-            regla="PESO_FACTURA_VS_BL",
-            severidad="MEDIA",
-            detalle="No se pudo validar el peso bruto: falta el dato en la Factura y/o en el BL.",
-            valor_a={"peso_bruto_kg_factura": factura.peso_bruto_kg},
-            valor_b={"peso_bruto_kg_bl": bl.peso_bruto_kg},
-        ))
+    if diferencia < p.umbral_inferior:
+        severidad = p.severidad_inferior
+        detalle = (
+            f"{regla.nombre}: el valor de {_NOMBRE_DOCUMENTO_LEGIBLE[regla.documento_b]} ({valor_b}) es "
+            f"menor al de {_NOMBRE_DOCUMENTO_LEGIBLE[regla.documento_a]} ({valor_a}) en {abs(diferencia):.1%}."
+        )
+    elif diferencia > p.umbral_superior:
+        severidad = p.severidad_superior
+        detalle = (
+            f"{regla.nombre}: el valor de {_NOMBRE_DOCUMENTO_LEGIBLE[regla.documento_b]} ({valor_b}) es "
+            f"mayor al de {_NOMBRE_DOCUMENTO_LEGIBLE[regla.documento_a]} ({valor_a}) en {diferencia:.1%}."
+        )
     else:
-        diferencia = _diferencia_relativa(factura.peso_bruto_kg, bl.peso_bruto_kg)
-        if diferencia <= TOLERANCIA_PESO:
-            resultados.append(ResultadoValidacion(
-                regla="PESO_FACTURA_VS_BL",
-                severidad="NINGUNA",
-                detalle=f"Peso bruto coherente entre Factura ({factura.peso_bruto_kg} kg) y BL ({bl.peso_bruto_kg} kg).",
-                valor_a={"peso_bruto_kg_factura": factura.peso_bruto_kg},
-                valor_b={"peso_bruto_kg_bl": bl.peso_bruto_kg},
-            ))
-        else:
-            resultados.append(ResultadoValidacion(
-                regla="PESO_FACTURA_VS_BL",
-                severidad="ALTA",
+        severidad = "NINGUNA"
+        detalle = (
+            f"{regla.nombre}: valores coherentes ({_NOMBRE_DOCUMENTO_LEGIBLE[regla.documento_a]}={valor_a}, "
+            f"{_NOMBRE_DOCUMENTO_LEGIBLE[regla.documento_b]}={valor_b})."
+        )
+
+    return ResultadoValidacion(
+        regla=regla.codigo, severidad=severidad, detalle=detalle,
+        valor_a={etiqueta_a: valor_a}, valor_b={etiqueta_b: valor_b},
+    )
+
+
+def _aplicar_igualdad_exacta(
+    regla: ReglaValidacion, valor_a: object, valor_b: object, etiqueta_a: str, etiqueta_b: str
+) -> ResultadoValidacion:
+    p = ParametrosIgualdadExacta.model_validate(regla.parametros)
+    if p.normalizar_texto:
+        iguales = str(valor_a).strip().upper() == str(valor_b).strip().upper()
+    else:
+        iguales = valor_a == valor_b
+
+    severidad: Severidad = "NINGUNA" if iguales else p.severidad_si_distinto
+    detalle = (
+        f"{regla.nombre}: coincide ({valor_a})."
+        if iguales else
+        f"{regla.nombre}: difiere entre {_NOMBRE_DOCUMENTO_LEGIBLE[regla.documento_a]} ({valor_a}) y "
+        f"{_NOMBRE_DOCUMENTO_LEGIBLE[regla.documento_b]} ({valor_b})."
+    )
+    return ResultadoValidacion(
+        regla=regla.codigo, severidad=severidad, detalle=detalle,
+        valor_a={etiqueta_a: valor_a}, valor_b={etiqueta_b: valor_b},
+    )
+
+
+def _aplicar_texto_fuzzy(
+    regla: ReglaValidacion, valor_a: object, valor_b: object, etiqueta_a: str, etiqueta_b: str
+) -> ResultadoValidacion:
+    p = ParametrosTextoFuzzy.model_validate(regla.parametros)
+    normalizado_a = _normalizar_razon_social(str(valor_a))
+    normalizado_b = _normalizar_razon_social(str(valor_b))
+    similitud = fuzz.ratio(normalizado_a, normalizado_b) / 100
+
+    if similitud >= p.umbral_similitud:
+        severidad: Severidad = "NINGUNA"
+        detalle = f"{regla.nombre}: coincide ('{valor_a}' ~ '{valor_b}')."
+    else:
+        severidad = p.severidad_si_distinto
+        detalle = (
+            f"{regla.nombre}: '{valor_a}' no coincide con '{valor_b}' (similitud {similitud:.0%}, "
+            f"umbral {p.umbral_similitud:.0%})."
+        )
+    return ResultadoValidacion(
+        regla=regla.codigo, severidad=severidad, detalle=detalle,
+        valor_a={etiqueta_a: valor_a}, valor_b={etiqueta_b: valor_b},
+    )
+
+
+def _aplicar_regla(regla: ReglaValidacion, documentos: dict[TipoDocumento, BaseModel]) -> ResultadoValidacion:
+    doc_a = documentos.get(regla.documento_a)
+    doc_b = documentos.get(regla.documento_b)
+
+    if doc_a is None or doc_b is None:
+        faltantes = [
+            _NOMBRE_DOCUMENTO_LEGIBLE[n] for n, d in ((regla.documento_a, doc_a), (regla.documento_b, doc_b))
+            if d is None
+        ]
+        return ResultadoValidacion(
+            regla=regla.codigo,
+            severidad=regla.severidad_dato_faltante,
+            detalle=f"No se pudo aplicar '{regla.nombre}': falta {' y '.join(faltantes)}.",
+        )
+
+    valor_a = getattr(doc_a, regla.campo_a)
+    valor_b = getattr(doc_b, regla.campo_b)
+    etiqueta_a = f"{regla.campo_a}_{regla.documento_a.lower()}"
+    etiqueta_b = f"{regla.campo_b}_{regla.documento_b.lower()}"
+
+    if _es_dato_faltante(valor_a) or _es_dato_faltante(valor_b):
+        return ResultadoValidacion(
+            regla=regla.codigo,
+            severidad=regla.severidad_dato_faltante,
+            detalle=f"No se pudo aplicar '{regla.nombre}': falta el dato en uno de los dos documentos.",
+            valor_a={etiqueta_a: valor_a}, valor_b={etiqueta_b: valor_b},
+        )
+
+    if regla.campo_moneda_a and regla.campo_moneda_b:
+        moneda_a = str(getattr(doc_a, regla.campo_moneda_a) or "").upper()
+        moneda_b = str(getattr(doc_b, regla.campo_moneda_b) or "").upper()
+        if moneda_a and moneda_b and moneda_a != moneda_b:
+            return ResultadoValidacion(
+                regla=regla.codigo,
+                severidad=regla.severidad_moneda_distinta or "MEDIA",
                 detalle=(
-                    f"El peso bruto declarado difiere en {diferencia:.1%} entre la Factura "
-                    f"({factura.peso_bruto_kg} kg) y el BL ({bl.peso_bruto_kg} kg); tolerancia permitida: {TOLERANCIA_PESO:.0%}."
+                    f"{regla.nombre}: la moneda de {_NOMBRE_DOCUMENTO_LEGIBLE[regla.documento_a]} ({moneda_a}) "
+                    f"difiere de la de {_NOMBRE_DOCUMENTO_LEGIBLE[regla.documento_b]} ({moneda_b}); no se puede "
+                    f"comparar directamente sin una tasa de cambio."
                 ),
-                valor_a={"peso_bruto_kg_factura": factura.peso_bruto_kg},
-                valor_b={"peso_bruto_kg_bl": bl.peso_bruto_kg},
-            ))
+                valor_a={etiqueta_a: valor_a}, valor_b={etiqueta_b: valor_b},
+            )
 
-    if factura.cantidad_bultos is None or bl.cantidad_bultos is None:
-        resultados.append(ResultadoValidacion(
-            regla="BULTOS_FACTURA_VS_BL",
-            severidad="MEDIA",
-            detalle="No se pudo validar la cantidad de bultos: falta el dato en la Factura y/o en el BL.",
-            valor_a={"cantidad_bultos_factura": factura.cantidad_bultos},
-            valor_b={"cantidad_bultos_bl": bl.cantidad_bultos},
-        ))
-    elif factura.cantidad_bultos == bl.cantidad_bultos:
-        resultados.append(ResultadoValidacion(
-            regla="BULTOS_FACTURA_VS_BL",
-            severidad="NINGUNA",
-            detalle=f"Cantidad de bultos coincide: {factura.cantidad_bultos}.",
-            valor_a={"cantidad_bultos_factura": factura.cantidad_bultos},
-            valor_b={"cantidad_bultos_bl": bl.cantidad_bultos},
-        ))
-    else:
-        resultados.append(ResultadoValidacion(
-            regla="BULTOS_FACTURA_VS_BL",
-            severidad="ALTA",
-            detalle=(
-                f"La cantidad de bultos difiere entre la Factura ({factura.cantidad_bultos}) "
-                f"y el BL ({bl.cantidad_bultos})."
-            ),
-            valor_a={"cantidad_bultos_factura": factura.cantidad_bultos},
-            valor_b={"cantidad_bultos_bl": bl.cantidad_bultos},
-        ))
-
-    return resultados
+    if regla.tipo_comparacion == "RANGO_ASIMETRICO":
+        return _aplicar_rango_asimetrico(regla, valor_a, valor_b, etiqueta_a, etiqueta_b)
+    if regla.tipo_comparacion == "IGUALDAD_EXACTA":
+        return _aplicar_igualdad_exacta(regla, valor_a, valor_b, etiqueta_a, etiqueta_b)
+    return _aplicar_texto_fuzzy(regla, valor_a, valor_b, etiqueta_a, etiqueta_b)
 
 
-def validar_monto_factura_vs_swift(factura: FacturaSchema, swift: SwiftSchema) -> ResultadoValidacion:
-    """Verifica coherencia entre el monto facturado y el monto transferido.
-    Un pago menor al total (anticipo) es MEDIA; un pago mayor al total
-    (sobrepago o error de digitacion) es ALTA."""
-    regla = "MONTO_FACTURA_VS_SWIFT"
-
-    if factura.moneda.upper() != swift.moneda.upper():
-        return ResultadoValidacion(
-            regla=regla,
-            severidad="MEDIA",
-            detalle=(
-                f"La moneda de la Factura ({factura.moneda}) difiere de la del SWIFT ({swift.moneda}); "
-                f"no se puede comparar el monto directamente sin una tasa de cambio."
-            ),
-            valor_a={"monto_total_factura": factura.monto_total, "moneda_factura": factura.moneda},
-            valor_b={"monto_swift": swift.monto, "moneda_swift": swift.moneda},
-        )
-
-    if swift.monto > factura.monto_total:
-        severidad: Severidad = "ALTA"
-        detalle = (
-            f"El monto transferido por SWIFT ({swift.monto} {swift.moneda}) es mayor al monto "
-            f"facturado ({factura.monto_total} {factura.moneda}); podria tratarse de un error o de un "
-            f"pago que incluye otros conceptos no facturados."
-        )
-    elif swift.monto < factura.monto_total:
-        severidad = "MEDIA"
-        detalle = (
-            f"El monto transferido por SWIFT ({swift.monto} {swift.moneda}) es menor al monto "
-            f"facturado ({factura.monto_total} {factura.moneda}); podria tratarse de un pago parcial/anticipo "
-            f"pendiente de completar."
-        )
-    else:
-        severidad = "NINGUNA"
-        detalle = f"El monto transferido por SWIFT coincide con el monto facturado ({factura.monto_total} {factura.moneda})."
-
-    return ResultadoValidacion(
-        regla=regla,
-        severidad=severidad,
-        detalle=detalle,
-        valor_a={"monto_total_factura": factura.monto_total, "moneda_factura": factura.moneda},
-        valor_b={"monto_swift": swift.monto, "moneda_swift": swift.moneda},
-    )
-
-
-def validar_valor_asegurado_vs_factura(seguro: SeguroSchema, factura: FacturaSchema) -> ResultadoValidacion:
-    """El valor asegurado tipicamente debe ser igual o mayor al monto
-    facturado (una poliza CIF suele cubrir mercancia + flete + seguro).
-    Un valor asegurado menor al de la factura es una senal de
-    subaseguramiento (severidad ALTA)."""
-    regla = "VALOR_ASEGURADO_VS_FACTURA"
-
-    if seguro.moneda.upper() != factura.moneda.upper():
-        return ResultadoValidacion(
-            regla=regla,
-            severidad="MEDIA",
-            detalle=(
-                f"La moneda de la Poliza ({seguro.moneda}) difiere de la de la Factura ({factura.moneda}); "
-                f"no se puede comparar el valor asegurado directamente sin una tasa de cambio."
-            ),
-            valor_a={"valor_asegurado": seguro.valor_asegurado, "moneda_seguro": seguro.moneda},
-            valor_b={"monto_total_factura": factura.monto_total, "moneda_factura": factura.moneda},
-        )
-
-    if seguro.valor_asegurado < factura.monto_total:
-        severidad: Severidad = "ALTA"
-        detalle = (
-            f"El valor asegurado ({seguro.valor_asegurado} {seguro.moneda}) es menor al monto facturado "
-            f"({factura.monto_total} {factura.moneda}); la carga podria estar subasegurada."
-        )
-    elif _diferencia_relativa(seguro.valor_asegurado, factura.monto_total) > UMBRAL_DIFERENCIA_SEGURO:
-        severidad = "MEDIA"
-        detalle = (
-            f"El valor asegurado ({seguro.valor_asegurado} {seguro.moneda}) supera en mas de "
-            f"{UMBRAL_DIFERENCIA_SEGURO:.0%} al monto facturado ({factura.monto_total} {factura.moneda}); "
-            f"conviene revisar que la diferencia corresponda a flete y prima de seguro."
-        )
-    else:
-        severidad = "NINGUNA"
-        detalle = (
-            f"El valor asegurado ({seguro.valor_asegurado} {seguro.moneda}) es coherente con el monto "
-            f"facturado ({factura.monto_total} {factura.moneda})."
-        )
-
-    return ResultadoValidacion(
-        regla=regla,
-        severidad=severidad,
-        detalle=detalle,
-        valor_a={"valor_asegurado": seguro.valor_asegurado, "moneda_seguro": seguro.moneda},
-        valor_b={"monto_total_factura": factura.monto_total, "moneda_factura": factura.moneda},
-    )
-
-
-def validar_consignatario_factura_vs_bl(factura: FacturaSchema, bl: BLSchema) -> ResultadoValidacion:
-    """Chequeo estricto (antifraude): el comprador/consignatario de la
-    Factura debe corresponder al consignatario del BL. Se normalizan
-    sufijos societarios y se usa similitud difusa para tolerar pequenas
-    variaciones de formato sin dejar pasar razones sociales distintas."""
-    regla = "CONSIGNATARIO_FACTURA_VS_BL"
-
-    normalizado_factura = _normalizar_razon_social(factura.comprador_consignatario)
-    normalizado_bl = _normalizar_razon_social(bl.consignatario)
-    similitud = fuzz.ratio(normalizado_factura, normalizado_bl) / 100
-
-    if similitud >= UMBRAL_SIMILITUD_CONSIGNATARIO:
-        severidad: Severidad = "NINGUNA"
-        detalle = (
-            f"El consignatario de la Factura ('{factura.comprador_consignatario}') coincide con el del BL "
-            f"('{bl.consignatario}')."
-        )
-    else:
-        severidad = "ALTA"
-        detalle = (
-            f"El consignatario de la Factura ('{factura.comprador_consignatario}') no coincide con el del BL "
-            f"('{bl.consignatario}'); similitud {similitud:.0%}, por debajo del umbral requerido "
-            f"({UMBRAL_SIMILITUD_CONSIGNATARIO:.0%}). Este es un chequeo antifraude critico."
-        )
-
-    return ResultadoValidacion(
-        regla=regla,
-        severidad=severidad,
-        detalle=detalle,
-        valor_a={"consignatario_factura": factura.comprador_consignatario},
-        valor_b={"consignatario_bl": bl.consignatario},
-    )
-
-
-def validar_incoterm(factura: FacturaSchema, bl: BLSchema) -> ResultadoValidacion:
-    """Compara el Incoterm declarado en Factura y BL. El BL no siempre lo
-    trae explicito, en cuyo caso el chequeo queda como no verificable."""
-    regla = "INCOTERM"
-
-    if not factura.incoterm or not bl.incoterm:
-        return ResultadoValidacion(
-            regla=regla,
-            severidad="MEDIA",
-            detalle="No se pudo verificar el Incoterm: no figura explicitamente en la Factura y/o en el BL.",
-            valor_a={"incoterm_factura": factura.incoterm},
-            valor_b={"incoterm_bl": bl.incoterm},
-        )
-
-    if factura.incoterm.strip().upper() == bl.incoterm.strip().upper():
-        severidad: Severidad = "NINGUNA"
-        detalle = f"El Incoterm coincide entre la Factura y el BL ({factura.incoterm.upper()})."
-    else:
-        severidad = "ALTA"
-        detalle = (
-            f"El Incoterm declarado en la Factura ({factura.incoterm}) difiere del declarado en el BL "
-            f"({bl.incoterm})."
-        )
-
-    return ResultadoValidacion(
-        regla=regla,
-        severidad=severidad,
-        detalle=detalle,
-        valor_a={"incoterm_factura": factura.incoterm},
-        valor_b={"incoterm_bl": bl.incoterm},
-    )
-
-
-# ---------------------------------------------------------------------
-# Orquestador
-# ---------------------------------------------------------------------
-
-def ejecutar_validaciones(documentos: dict[TipoDocumento, BaseModel]) -> list[ResultadoValidacion]:
-    """Ejecuta todas las reglas cruzadas posibles con los documentos
-    disponibles. Si falta un documento requerido para una regla, se
-    reporta esa regla como no verificable (severidad MEDIA) en vez de
-    lanzar un error, para que el resto de validaciones se sigan
-    ejecutando con lo que si esta disponible."""
-    resultados: list[ResultadoValidacion] = []
-
-    factura = documentos.get("FACTURA")
-    seguro = documentos.get("SEGURO")
-    swift = documentos.get("SWIFT_BANCARIO")
-    bl = documentos.get("BL")
-
-    if factura and bl:
-        resultados.extend(validar_peso_bultos_factura_vs_bl(factura, bl))
-        resultados.append(validar_consignatario_factura_vs_bl(factura, bl))
-        resultados.append(validar_incoterm(factura, bl))
-    else:
-        faltantes = [n for n, d in (("FACTURA", factura), ("BL", bl)) if d is None]
-        resultados.append(ResultadoValidacion(
-            regla="PESO_BULTOS_CONSIGNATARIO_INCOTERM",
-            severidad="MEDIA",
-            detalle=f"No se pudo comparar Factura vs BL: falta(n) {', '.join(faltantes)}.",
-        ))
-
-    if factura and swift:
-        resultados.append(validar_monto_factura_vs_swift(factura, swift))
-    else:
-        faltantes = [n for n, d in (("FACTURA", factura), ("SWIFT_BANCARIO", swift)) if d is None]
-        resultados.append(ResultadoValidacion(
-            regla="MONTO_FACTURA_VS_SWIFT",
-            severidad="MEDIA",
-            detalle=f"No se pudo comparar Factura vs SWIFT: falta(n) {', '.join(faltantes)}.",
-        ))
-
-    if seguro and factura:
-        resultados.append(validar_valor_asegurado_vs_factura(seguro, factura))
-    else:
-        faltantes = [n for n, d in (("SEGURO", seguro), ("FACTURA", factura)) if d is None]
-        resultados.append(ResultadoValidacion(
-            regla="VALOR_ASEGURADO_VS_FACTURA",
-            severidad="MEDIA",
-            detalle=f"No se pudo comparar Seguro vs Factura: falta(n) {', '.join(faltantes)}.",
-        ))
-
-    return resultados
+def ejecutar_validaciones(
+    documentos: dict[TipoDocumento, BaseModel], reglas: list[ReglaValidacion]
+) -> list[ResultadoValidacion]:
+    """Ejecuta todas las reglas ACTIVAS contra los documentos disponibles.
+    Si a una regla le falta un documento entero o un campo especifico, se
+    reporta esa regla puntual como no verificable (severidad configurable
+    por regla, `severidad_dato_faltante`) en vez de lanzar un error, para
+    que el resto de reglas se sigan evaluando con lo que si esta
+    disponible -- mismo espiritu que el motor anterior, pero ahora un
+    resultado por regla individual en vez de un resultado "paraguas" que
+    agrupaba varias reglas por par de documentos (esa agrupacion fija ya
+    no tiene sentido una vez que las reglas son dinamicas: dos reglas
+    activas pueden compartir par de documentos o no, es un hecho que solo
+    se sabe en tiempo de ejecucion)."""
+    return [_aplicar_regla(regla, documentos) for regla in reglas if regla.activo]
 
 
 def hay_informacion_suficiente_para_clasificar(factura: FacturaSchema) -> bool:

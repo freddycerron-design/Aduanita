@@ -22,6 +22,12 @@ Los endpoints granulares /validar, /clasificar y /generar-borrador siguen
 disponibles por separado (util para depurar via /docs), pero no mueven el
 estado del despacho por si solos -- solo /enviar-a-clasificacion y
 /decision lo hacen, que son las dos transiciones reales del flujo.
+
+Administracion (solo rol ADMIN): /admin/reglas-validacion (GET/POST/PUT/
+DELETE) es el CRUD del motor de reglas de validacion cruzada -- las
+reglas que antes eran funciones Python hardcodeadas en
+services/validation_engine.py ahora son filas de la tabla
+reglas_validacion, interpretadas genericamente por ese mismo modulo.
 """
 from __future__ import annotations
 
@@ -30,7 +36,7 @@ from typing import Literal
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from supabase import Client
 
 from app.config import get_settings, get_supabase_admin_client, get_supabase_user_client
@@ -44,6 +50,10 @@ from services.gemini_classifier import PropuestaClasificacion, clasificar
 from services.pdf_processor import TIPO_A_SCHEMA, TipoDocumento, procesar_documento
 from services.rag_service import buscar_antecedentes, guardar_feedback
 from services.validation_engine import (
+    ParametrosIgualdadExacta,
+    ParametrosRangoAsimetrico,
+    ParametrosTextoFuzzy,
+    ReglaValidacion,
     ResultadoValidacion,
     ejecutar_validaciones,
     hay_informacion_suficiente_para_clasificar,
@@ -221,6 +231,32 @@ class PipelineResultOut(BaseModel):
     estado_final: str
 
 
+class ReglaValidacionUpsert(BaseModel):
+    codigo: str
+    nombre: str
+    descripcion: str | None = None
+    activo: bool = True
+    documento_a: TipoDocumento
+    campo_a: str
+    documento_b: TipoDocumento
+    campo_b: str
+    campo_moneda_a: str | None = None
+    campo_moneda_b: str | None = None
+    severidad_moneda_distinta: Literal["ALTA", "MEDIA", "NINGUNA"] | None = None
+    severidad_dato_faltante: Literal["ALTA", "MEDIA", "NINGUNA"]
+    tipo_comparacion: Literal["RANGO_ASIMETRICO", "IGUALDAD_EXACTA", "TEXTO_FUZZY"]
+    # Shape depende de tipo_comparacion -- ver ParametrosRangoAsimetrico/
+    # ParametrosIgualdadExacta/ParametrosTextoFuzzy en validation_engine.py,
+    # validado en _validar_regla_o_400 antes de persistir.
+    parametros: dict
+
+
+class ReglaValidacionOut(ReglaValidacionUpsert):
+    id: str
+    creado_en: str
+    actualizado_en: str
+
+
 # ---------------------------------------------------------------------
 # Helpers internos
 # ---------------------------------------------------------------------
@@ -230,6 +266,55 @@ def _obtener_despacho_o_404(admin: Client, id_despacho: str) -> dict:
     if not respuesta.data:
         raise HTTPException(status_code=404, detail=f"No existe un despacho con id {id_despacho}.")
     return respuesta.data[0]
+
+
+def _obtener_regla_o_404(admin: Client, id_regla: str) -> dict:
+    respuesta = admin.table("reglas_validacion").select("*").eq("id", id_regla).execute()
+    if not respuesta.data:
+        raise HTTPException(status_code=404, detail=f"No existe una regla de validacion con id {id_regla}.")
+    return respuesta.data[0]
+
+
+_PARAMETROS_POR_TIPO: dict[str, type[BaseModel]] = {
+    "RANGO_ASIMETRICO": ParametrosRangoAsimetrico,
+    "IGUALDAD_EXACTA": ParametrosIgualdadExacta,
+    "TEXTO_FUZZY": ParametrosTextoFuzzy,
+}
+
+
+def _validar_regla_o_400(datos: ReglaValidacionUpsert) -> dict:
+    """Valida una regla de validacion antes de persistirla: que campo_a/
+    campo_b existan de verdad en el schema Pydantic del documento
+    correspondiente (services/pdf_processor.TIPO_A_SCHEMA), que el par de
+    campos de moneda venga completo o vacio, y que `parametros` tenga el
+    shape correcto segun `tipo_comparacion`. Devuelve el dict listo para
+    insert/update, con `parametros` ya normalizado contra su schema."""
+    for documento, campo in ((datos.documento_a, datos.campo_a), (datos.documento_b, datos.campo_b)):
+        if campo not in TIPO_A_SCHEMA[documento].model_fields:
+            raise HTTPException(
+                status_code=400,
+                detail=f"El campo '{campo}' no existe en el schema de {documento}.",
+            )
+
+    if (datos.campo_moneda_a is None) != (datos.campo_moneda_b is None):
+        raise HTTPException(
+            status_code=400,
+            detail="campo_moneda_a y campo_moneda_b deben venir juntos (ambos vacios o ambos completos).",
+        )
+    if datos.campo_moneda_a and not datos.severidad_moneda_distinta:
+        raise HTTPException(
+            status_code=400,
+            detail="severidad_moneda_distinta es obligatoria cuando se configura un chequeo de moneda.",
+        )
+
+    try:
+        modelo_parametros = _PARAMETROS_POR_TIPO[datos.tipo_comparacion].model_validate(datos.parametros)
+    except ValidationError as error:
+        raise HTTPException(
+            status_code=400, detail=f"parametros invalido para {datos.tipo_comparacion}: {error}"
+        ) from error
+
+    return {**datos.model_dump(exclude={"parametros"}), "parametros": modelo_parametros.model_dump()}
 
 
 def _actualizar_estado_despacho(admin: Client, id_despacho: str, estado: str) -> None:
@@ -306,17 +391,25 @@ def _obtener_validaciones(admin: Client, id_despacho: str) -> list[ResultadoVali
     return [ResultadoValidacion.model_validate(fila) for fila in (respuesta.data or [])]
 
 
+def _obtener_reglas_activas(admin: Client) -> list[ReglaValidacion]:
+    respuesta = admin.table("reglas_validacion").select("*").eq("activo", True).execute()
+    return [ReglaValidacion.model_validate(fila) for fila in (respuesta.data or [])]
+
+
 def _ejecutar_validacion(admin: Client, id_despacho: str) -> list[ResultadoValidacion]:
     filas = _obtener_documentos_extraidos(admin, id_despacho)
     documentos = _documentos_a_modelos(filas)
 
-    if "FACTURA" not in documentos or "BL" not in documentos:
-        raise HTTPException(
-            status_code=400,
-            detail="Se requiere al menos la Factura y el BL cargados para poder ejecutar las validaciones.",
-        )
-
-    resultados = ejecutar_validaciones(documentos)
+    # Ya no hay un minimo de documentos hardcodeado aca: con el motor
+    # generico, cada regla activa evalua independientemente y reporta
+    # "dato faltante" si el documento que necesita no esta -- correr sin
+    # ningun documento simplemente produce N resultados de ese tipo, un
+    # comportamiento valido que no hace falta bloquear. El gate de negocio
+    # real (no tiene sentido "procesar" sin Factura+BL) sigue viviendo en
+    # el frontend (DOCUMENTOS_MINIMOS) y en _ejecutar_clasificacion (que
+    # exige Factura por su cuenta, sin relacion con este motor).
+    reglas = _obtener_reglas_activas(admin)
+    resultados = ejecutar_validaciones(documentos, reglas)
 
     # Se limpian los resultados previos para evitar duplicados si el
     # especialista vuelve a correr la validacion (p.ej. tras corregir un PDF).
@@ -324,7 +417,8 @@ def _ejecutar_validacion(admin: Client, id_despacho: str) -> list[ResultadoValid
     filas_insertar = [
         {"id_despacho": id_despacho, **r.model_dump()} for r in resultados
     ]
-    admin.table("resultados_validacion").insert(filas_insertar).execute()
+    if filas_insertar:  # insert([]) puede fallar; con 0 reglas activas no hay nada que guardar
+        admin.table("resultados_validacion").insert(filas_insertar).execute()
 
     # La validacion en si no mueve el estado del despacho (se queda en
     # REVISION_DOC); las discrepancias quedan disponibles en el tab de
@@ -638,3 +732,64 @@ def enviar_a_clasificacion(
         "borrador": borrador,
         "estado_final": despacho_actualizado["estado"],
     }
+
+
+# ---------------------------------------------------------------------
+# Administracion (solo ADMIN): CRUD de reglas de validacion
+# ---------------------------------------------------------------------
+
+@app.get("/admin/reglas-validacion", response_model=list[ReglaValidacionOut])
+def listar_reglas_validacion(usuario: UsuarioAutenticado = Depends(get_current_user)) -> list[dict]:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    return admin.table("reglas_validacion").select("*").order("nombre").execute().data or []
+
+
+@app.post("/admin/reglas-validacion", response_model=ReglaValidacionOut)
+def crear_regla_validacion(
+    datos: ReglaValidacionUpsert, usuario: UsuarioAutenticado = Depends(get_current_user)
+) -> dict:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    fila = _validar_regla_o_400(datos)
+    fila["creado_por"] = usuario.id
+    try:
+        respuesta = admin.table("reglas_validacion").insert(fila).execute()
+    except Exception as error:
+        if "duplicate key" in str(error) or "23505" in str(error):
+            raise HTTPException(
+                status_code=400, detail=f"Ya existe una regla con codigo '{datos.codigo}'."
+            ) from error
+        raise
+    return respuesta.data[0]
+
+
+@app.put("/admin/reglas-validacion/{id_regla}", response_model=ReglaValidacionOut)
+def actualizar_regla_validacion(
+    id_regla: str, datos: ReglaValidacionUpsert, usuario: UsuarioAutenticado = Depends(get_current_user)
+) -> dict:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    _obtener_regla_o_404(admin, id_regla)
+    fila = _validar_regla_o_400(datos)
+    fila["actualizado_en"] = _ahora_iso()
+    try:
+        respuesta = admin.table("reglas_validacion").update(fila).eq("id", id_regla).execute()
+    except Exception as error:
+        if "duplicate key" in str(error) or "23505" in str(error):
+            raise HTTPException(
+                status_code=400, detail=f"Ya existe una regla con codigo '{datos.codigo}'."
+            ) from error
+        raise
+    return respuesta.data[0]
+
+
+@app.delete("/admin/reglas-validacion/{id_regla}")
+def eliminar_regla_validacion(
+    id_regla: str, usuario: UsuarioAutenticado = Depends(get_current_user)
+) -> dict:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    _obtener_regla_o_404(admin, id_regla)
+    admin.table("reglas_validacion").delete().eq("id", id_regla).execute()
+    return {"status": "ok"}
