@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { FileJson, FileText } from "lucide-react";
 
+import { cn } from "@/lib/utils";
 import { TIPOS_DOCUMENTO } from "@/lib/types";
 import type { DocumentoExtraidoOut, TipoDocumento } from "@/lib/types";
 import { useSignedPdfUrl } from "@/hooks/useSignedPdfUrl";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 
 type ModoVisor = "JSON" | "PDF";
@@ -14,45 +14,95 @@ export interface DocumentViewerProps {
   documentos: DocumentoExtraidoOut[];
 }
 
+const MAX_SELECCION = 2;
+
 /**
- * Selector de tipo de documento + toggle JSON/PDF. La URL firmada del PDF
- * se pide de forma perezosa -- solo cuando el usuario esta en modo "PDF",
- * via `useSignedPdfUrl` -- para no gastar llamadas a Storage mientras esta
- * mirando el JSON.
+ * Selector de documentos (hasta 2 a la vez, con FIFO -- elegir un tercero
+ * reemplaza al mas antiguo) + comparacion lado a lado. Con 1 seleccionado
+ * se ve una sola ventana a ancho completo; con 2, dos ventanas una al
+ * costado de la otra para que el usuario compare visualmente (cada una
+ * con su propio toggle JSON/PDF independiente -- se puede comparar PDF
+ * contra PDF, JSON contra JSON, o cruzado).
  */
 export function DocumentViewer({ documentos }: DocumentViewerProps) {
   const disponibles = TIPOS_DOCUMENTO.filter((tipo) => documentos.some((d) => d.tipo_documento === tipo));
-  const [tipoSeleccionado, setTipoSeleccionado] = useState<TipoDocumento | undefined>(undefined);
-  const [modo, setModo] = useState<ModoVisor>("JSON");
+  const [seleccionados, setSeleccionados] = useState<TipoDocumento[]>([]);
 
-  // Si el tipo elegido ya no esta disponible (p.ej. se elimino), cae al
-  // primero disponible sin necesidad de un efecto.
-  const tipoActivo = tipoSeleccionado && disponibles.includes(tipoSeleccionado) ? tipoSeleccionado : disponibles[0];
-  const documento = documentos.find((d) => d.tipo_documento === tipoActivo);
+  // Si nada esta explicitamente seleccionado (primera carga, o el/los
+  // tipos elegidos ya no estan disponibles porque se eliminaron), cae al
+  // primer documento disponible -- mismo espiritu de fallback que tenia
+  // el <Select> original, sin necesidad de un efecto.
+  const seleccionValida = seleccionados.filter((tipo) => disponibles.includes(tipo));
+  const tiposAVer = seleccionValida.length > 0 ? seleccionValida : disponibles.slice(0, 1);
 
-  const signedUrl = useSignedPdfUrl(documento?.url_pdf_storage ?? "", modo === "PDF" && !!documento);
+  function alternarSeleccion(tipo: TipoDocumento) {
+    // Parte de lo que se esta viendo AHORA (incluye el fallback implicito
+    // de arriba), no del estado crudo -- asi el primer click sobre un
+    // segundo tipo lo agrega al que ya se ve por defecto, en vez de
+    // reemplazarlo.
+    if (tiposAVer.includes(tipo)) {
+      setSeleccionados(tiposAVer.filter((t) => t !== tipo));
+    } else if (tiposAVer.length >= MAX_SELECCION) {
+      setSeleccionados([...tiposAVer.slice(1), tipo]); // bota el mas antiguo
+    } else {
+      setSeleccionados([...tiposAVer, tipo]);
+    }
+  }
 
-  if (!documento || !tipoActivo) {
+  if (disponibles.length === 0) {
     return <p className="text-sm text-texto-secundario">Aún no se ha cargado ningún documento.</p>;
   }
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <Select value={tipoActivo} onValueChange={(valor) => setTipoSeleccionado(valor as TipoDocumento)}>
-          <SelectTrigger className="w-48">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {disponibles.map((tipo) => (
-              <SelectItem key={tipo} value={tipo}>
-                {tipo}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="flex flex-wrap items-center gap-2">
+        {disponibles.map((tipo) => {
+          const activo = tiposAVer.includes(tipo);
+          return (
+            <button
+              key={tipo}
+              type="button"
+              onClick={() => alternarSeleccion(tipo)}
+              aria-pressed={activo}
+              className={cn(
+                "rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
+                activo
+                  ? "border-coral bg-coral/15 text-coral"
+                  : "border-border bg-surface text-texto-secundario hover:text-texto",
+              )}
+            >
+              {tipo}
+            </button>
+          );
+        })}
+        <span className="text-xs text-texto-secundario">
+          Elige hasta {MAX_SELECCION} para comparar ({tiposAVer.length}/{MAX_SELECCION})
+        </span>
+      </div>
 
-        <div className="flex gap-1">
+      <div className={cn("grid gap-3", tiposAVer.length === 2 ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1")}>
+        {tiposAVer.map((tipo) => {
+          const documento = documentos.find((d) => d.tipo_documento === tipo);
+          return documento ? <DocumentPane key={tipo} tipo={tipo} documento={documento} /> : null;
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Una ventana individual del visor: encabezado con el tipo + toggle
+ * JSON/PDF propio, y el contenido segun el modo elegido. */
+function DocumentPane({ tipo, documento }: { tipo: TipoDocumento; documento: DocumentoExtraidoOut }) {
+  const [modo, setModo] = useState<ModoVisor>("JSON");
+  const signedUrl = useSignedPdfUrl(documento.url_pdf_storage, modo === "PDF");
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-xs font-semibold uppercase tracking-wide text-texto-secundario">
+          {tipo}
+        </span>
+        <div className="flex shrink-0 gap-1">
           <Button
             type="button"
             size="sm"
@@ -104,8 +154,8 @@ export function DocumentViewer({ documentos }: DocumentViewerProps) {
       ) : signedUrl.data ? (
         <iframe
           src={signedUrl.data}
-          className="w-full h-[480px] rounded-xl border border-border"
-          title={`PDF ${tipoActivo}`}
+          className="h-[480px] w-full rounded-xl border border-border"
+          title={`PDF ${tipo}`}
         />
       ) : null}
     </div>
