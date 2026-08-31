@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import html
 import os
+from pathlib import Path
 
 import httpx
 import streamlit as st
@@ -32,6 +33,12 @@ API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
 
 TIPOS_DOCUMENTO = ["FACTURA", "SEGURO", "SWIFT_BANCARIO", "BL"]
 
+# Assets de marca. Rutas resueltas relativas a este archivo (no al cwd),
+# para que funcionen sin importar desde donde se lance `streamlit run`.
+ASSETS_DIR = Path(__file__).parent / "assets"
+LOGO_PATH = ASSETS_DIR / "logo_aduanita.png"
+FAVICON_PATH = ASSETS_DIR / "favicon_aduanita.png"
+
 # Estados del despacho (ver app/main.py) y su etiqueta/grupo en el Explorer.
 GRUPOS_ESTADO = [
     ("REVISION_DOC", "📋 Revisión Doc."),
@@ -40,7 +47,11 @@ GRUPOS_ESTADO = [
     ("OBSERVADO", "⚠️ Observados"),
 ]
 
-st.set_page_config(page_title="AduANITA", page_icon="📦", layout="wide")
+st.set_page_config(
+    page_title="AduANITA",
+    page_icon=str(FAVICON_PATH) if FAVICON_PATH.exists() else "📦",
+    layout="wide",
+)
 
 
 # ---------------------------------------------------------------------
@@ -341,7 +352,10 @@ def pantalla_login() -> None:
     # columna angosta en vez de estirarse a todo el ancho de la pantalla.
     _, columna_central, _ = st.columns([1, 1.1, 1])
     with columna_central:
-        st.title("📦 AduANITA")
+        if LOGO_PATH.exists():
+            st.image(str(LOGO_PATH), width=320)
+        else:
+            st.title("📦 AduANITA")
         st.caption("Automatizacion de revision documental aduanera y clasificacion arancelaria asistida.")
 
         with st.form("login_form"):
@@ -393,6 +407,8 @@ PUEDE_DECIDIR_CLASIFICACION = USER_ROL in ("LIQUIDADOR", "ADMIN")
 # ---------------------------------------------------------------------
 
 with st.sidebar:
+    if LOGO_PATH.exists():
+        st.image(str(LOGO_PATH), width=170)
     st.markdown('<div class="icon-rail">', unsafe_allow_html=True)
     col_icono_1, col_icono_2 = st.columns(2)
     with col_icono_1:
