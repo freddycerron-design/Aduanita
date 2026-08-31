@@ -6,6 +6,7 @@ import { AccountPanel } from "@/components/layout/AccountPanel";
 import { ExplorerPanel } from "@/components/layout/ExplorerPanel";
 import type { PanelLateral } from "@/components/layout/IconRail";
 import { IconRail } from "@/components/layout/IconRail";
+import { useProfile } from "@/hooks/useProfile";
 import { cn } from "@/lib/utils";
 
 /**
@@ -17,6 +18,7 @@ export function DashboardLayout() {
   // `null` = panel lateral colapsado. Arranca en "archivos" (Explorador
   // visible por defecto).
   const [panelActivo, setPanelActivo] = useState<PanelLateral | null>("archivos");
+  const { data: perfil } = useProfile();
 
   // Clickear el icono ya activo lo colapsa (mismo comportamiento que el
   // Explorer de VSCode); clickear el otro icono, o el mismo estando
@@ -38,7 +40,7 @@ export function DashboardLayout() {
     <div className="flex h-dvh bg-background text-texto">
       <div className="flex w-14 shrink-0 flex-col items-center border-r border-border bg-surface">
         <img src={logo} alt="AduANITA" className="mt-4 w-10" />
-        <IconRail panelActivo={panelActivo} onCambiarPanel={alternarPanel} />
+        <IconRail panelActivo={panelActivo} onCambiarPanel={alternarPanel} rol={perfil?.rol} />
       </div>
 
       <div

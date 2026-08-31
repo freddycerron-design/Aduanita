@@ -101,7 +101,7 @@ export function RevisionTab({ idDespacho, estadoDespacho, documentos, validacion
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
           {TIPOS_DOCUMENTO.map((tipo) => (
             <DocumentUploadCard
               key={tipo}

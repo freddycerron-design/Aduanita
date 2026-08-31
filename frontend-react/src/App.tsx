@@ -8,6 +8,7 @@ import { LoginPage } from "@/routes/LoginPage";
 import { DashboardLayout } from "@/routes/DashboardLayout";
 import { DespachoPage } from "@/routes/DespachoPage";
 import { EmptyDespachoState } from "@/routes/EmptyDespachoState";
+import { AdminPage } from "@/routes/AdminPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,6 +37,7 @@ function AppRoutes() {
       >
         <Route index element={<EmptyDespachoState />} />
         <Route path="despachos/:id" element={<DespachoPage />} />
+        <Route path="admin" element={<AdminPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

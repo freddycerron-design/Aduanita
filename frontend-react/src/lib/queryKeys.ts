@@ -7,4 +7,7 @@ export const queryKeys = {
   },
   perfil: (userId: string) => ["perfil", userId] as const,
   pdfSignedUrl: (pathStorage: string) => ["pdf-signed-url", pathStorage] as const,
+  reglasValidacion: {
+    list: () => ["reglas-validacion"] as const,
+  },
 };

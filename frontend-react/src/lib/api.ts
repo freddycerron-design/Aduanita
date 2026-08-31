@@ -10,6 +10,8 @@ import type {
   EstadoDespacho,
   HistorialClasificacionOut,
   PipelineResultOut,
+  ReglaValidacionOut,
+  ReglaValidacionUpsert,
   TipoDocumento,
 } from "@/lib/types";
 
@@ -42,7 +44,7 @@ async function mensajeDeError(respuesta: Response): Promise<string> {
 }
 
 interface ApiFetchOptions {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   json?: unknown;
   formData?: FormData;
   query?: Record<string, string | undefined>;
@@ -163,4 +165,28 @@ export function registrarDecision(
     method: "POST",
     json: datos,
   });
+}
+
+// --- reglas de validacion (admin) ---------------------------------------
+
+export function listarReglasValidacion(): Promise<ReglaValidacionOut[]> {
+  return apiFetch<ReglaValidacionOut[]>("/admin/reglas-validacion");
+}
+
+export function crearReglaValidacion(datos: ReglaValidacionUpsert): Promise<ReglaValidacionOut> {
+  return apiFetch<ReglaValidacionOut>("/admin/reglas-validacion", { method: "POST", json: datos });
+}
+
+export function actualizarReglaValidacion(
+  idRegla: string,
+  datos: ReglaValidacionUpsert,
+): Promise<ReglaValidacionOut> {
+  return apiFetch<ReglaValidacionOut>(`/admin/reglas-validacion/${idRegla}`, {
+    method: "PUT",
+    json: datos,
+  });
+}
+
+export function eliminarReglaValidacion(idRegla: string): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>(`/admin/reglas-validacion/${idRegla}`, { method: "DELETE" });
 }

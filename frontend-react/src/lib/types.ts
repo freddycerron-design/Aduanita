@@ -8,9 +8,9 @@
  * backend, actualizar aqui.
  */
 
-export type TipoDocumento = "FACTURA" | "SEGURO" | "SWIFT_BANCARIO" | "BL";
+export type TipoDocumento = "FACTURA" | "SEGURO" | "SWIFT_BANCARIO" | "BL" | "PACKING_LIST";
 
-export const TIPOS_DOCUMENTO: TipoDocumento[] = ["FACTURA", "SEGURO", "SWIFT_BANCARIO", "BL"];
+export const TIPOS_DOCUMENTO: TipoDocumento[] = ["FACTURA", "SEGURO", "SWIFT_BANCARIO", "BL", "PACKING_LIST"];
 
 export type EstadoDespacho = "REVISION_DOC" | "CLASIFICACION" | "REVISADO" | "OBSERVADO";
 
@@ -151,4 +151,56 @@ export interface PerfilEspecialista {
   nombre_completo: string | null;
   rol: Rol;
   activo: boolean;
+}
+
+// --- reglas de validacion (admin, motor generico) ---------------------------
+
+/** Los 3 tipos de comparacion que interpreta `services/validation_engine.py`
+ * -- ver el comentario de la columna `tipo_comparacion` en
+ * `database/schema.sql` (tabla `reglas_validacion`) para el detalle exacto
+ * de la logica de cada uno. */
+export type TipoComparacion = "RANGO_ASIMETRICO" | "IGUALDAD_EXACTA" | "TEXTO_FUZZY";
+
+export interface ParametrosRangoAsimetrico {
+  umbral_inferior: number;
+  severidad_inferior: Severidad;
+  umbral_superior: number;
+  severidad_superior: Severidad;
+}
+
+export interface ParametrosIgualdadExacta {
+  severidad_si_distinto: Severidad;
+  normalizar_texto: boolean;
+}
+
+export interface ParametrosTextoFuzzy {
+  umbral_similitud: number;
+  severidad_si_distinto: Severidad;
+}
+
+export type ParametrosRegla = ParametrosRangoAsimetrico | ParametrosIgualdadExacta | ParametrosTextoFuzzy;
+
+export interface ReglaValidacionUpsert {
+  codigo: string;
+  nombre: string;
+  descripcion?: string | null;
+  activo: boolean;
+  documento_a: TipoDocumento;
+  campo_a: string;
+  documento_b: TipoDocumento;
+  campo_b: string;
+  campo_moneda_a?: string | null;
+  campo_moneda_b?: string | null;
+  severidad_moneda_distinta?: Severidad | null;
+  severidad_dato_faltante: Severidad;
+  tipo_comparacion: TipoComparacion;
+  /** Shape depende de `tipo_comparacion` -- el backend valida esto contra
+   * el discriminated union correspondiente antes de persistir. */
+  parametros: Record<string, unknown>;
+}
+
+export interface ReglaValidacionOut extends ReglaValidacionUpsert {
+  id: string;
+  creado_en: string;
+  actualizado_en: string;
 }

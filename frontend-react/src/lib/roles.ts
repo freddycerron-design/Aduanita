@@ -22,3 +22,12 @@ export function puedeEnviarAClasificacion(rol: Rol | null | undefined): boolean 
 export function puedeDecidirClasificacion(rol: Rol | null | undefined): boolean {
   return tieneRol(rol, ["LIQUIDADOR"]);
 }
+
+/** Acceso al CRUD de reglas de validacion (/admin/reglas-validacion).
+ * A diferencia de `tieneRol` (disenada para "rol de negocio O ADMIN"),
+ * esto es "solo ADMIN" -- espejo exacto de `_requiere_rol(usuario, set())`
+ * en app/main.py (un set vacio de roles permitidos: nada de negocio pasa,
+ * solo el bypass de ADMIN). No reusar `tieneRol` aca. */
+export function esAdmin(rol: Rol | null | undefined): boolean {
+  return rol === "ADMIN";
+}
