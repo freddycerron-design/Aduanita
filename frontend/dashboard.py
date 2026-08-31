@@ -226,10 +226,11 @@ h1, h2, h3, h4, h5 {
 }
 
 /* Numeros de orden en las pestanas del contenido principal (circulo
-   naranja, numero blanco) -- se dibujan con ::before sobre los botones
-   de pestana de BaseWeb, no se puede inyectar HTML dentro del label de
-   st.tabs directamente. */
-[data-testid="stTabs"] [data-baseweb="tab-list"] button::before {
+   naranja, numero blanco) -- se dibujan con ::before sobre cada pestana
+   (data-testid="stTab", no siempre es un <button> segun la version de
+   Streamlit), no se puede inyectar HTML dentro del label de st.tabs
+   directamente. */
+[data-testid="stTabs"] [data-testid="stTab"]::before {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -242,10 +243,28 @@ h1, h2, h3, h4, h5 {
     font-size: 0.72rem;
     font-weight: 700;
     vertical-align: middle;
+    flex-shrink: 0;
 }
-[data-testid="stTabs"] [data-baseweb="tab-list"] button:nth-of-type(1)::before { content: "1"; }
-[data-testid="stTabs"] [data-baseweb="tab-list"] button:nth-of-type(2)::before { content: "2"; }
-[data-testid="stTabs"] [data-baseweb="tab-list"] button:nth-of-type(3)::before { content: "3"; }
+[data-testid="stTabs"] [data-testid="stTab"]:nth-child(1)::before { content: "1"; }
+[data-testid="stTabs"] [data-testid="stTab"]:nth-child(2)::before { content: "2"; }
+[data-testid="stTabs"] [data-testid="stTab"]:nth-child(3)::before { content: "3"; }
+
+/* Boton "x" nativo de st.file_uploader para quitar un archivo cargado --
+   se agranda y se pinta de rojo para que sea claramente reconocible como
+   accion destructiva (reemplaza el boton "Eliminar" custom que existia
+   antes). Cubre tanto icono SVG como fuente Material Symbols segun la
+   version de Streamlit. */
+[data-testid="stFileChipDeleteBtn"] button {
+    color: var(--rojo) !important;
+}
+[data-testid="stFileChipDeleteBtn"] svg,
+[data-testid="stFileChipDeleteBtn"] [data-testid="stIconMaterial"] {
+    width: 24px !important;
+    height: 24px !important;
+    font-size: 24px !important;
+    color: var(--rojo) !important;
+    fill: var(--rojo) !important;
+}
 
 /* Badge de rol en el panel de cuenta */
 .rol-badge {
@@ -546,6 +565,7 @@ with tab_revision:
                 archivo = st.file_uploader(
                     f"PDF {tipo}", type="pdf", key=f"upload_{tipo}", label_visibility="collapsed"
                 )
+                clave_ultimo_subido = f"ultimo_subido_{tipo}"
 
                 if archivo is not None:
                     # Se sube en cuanto se selecciona un archivo, sea la
@@ -554,7 +574,6 @@ with tab_revision:
                     # anterior sin necesidad de eliminarlo primero). Se usa
                     # el file_id para no volver a subir el mismo archivo en
                     # cada rerun posterior mientras siga seleccionado.
-                    clave_ultimo_subido = f"ultimo_subido_{tipo}"
                     if st.session_state.get(clave_ultimo_subido) != archivo.file_id:
                         with st.spinner(f"Subiendo {tipo}..."):
                             resultado = api_post(
@@ -566,10 +585,16 @@ with tab_revision:
                             st.session_state[clave_ultimo_subido] = archivo.file_id
                             st.success(f"{tipo} cargado.")
                             st.rerun()
-
-                if cargado and st.button(f"🗑️ Eliminar", key=f"btn_delete_{tipo}", use_container_width=True):
-                    if api_delete(f"/despachos/{id_despacho}/documentos/{tipo}") is not None:
-                        st.session_state.pop(f"ultimo_subido_{tipo}", None)
+                elif st.session_state.get(clave_ultimo_subido):
+                    # El usuario quito el archivo con el icono "x" nativo del
+                    # uploader (agrandado y en rojo via CSS) -> hay que
+                    # eliminarlo tambien del backend (Storage + fila en BD),
+                    # no solo de la seleccion local del widget.
+                    with st.spinner(f"Eliminando {tipo}..."):
+                        eliminado = api_delete(f"/despachos/{id_despacho}/documentos/{tipo}")
+                    if eliminado is not None:
+                        st.session_state.pop(clave_ultimo_subido, None)
+                        st.success(f"{tipo} eliminado.")
                         st.rerun()
 
         st.divider()
