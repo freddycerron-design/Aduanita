@@ -80,7 +80,17 @@ export function ExplorerPanel({ idDespachoActivo }: ExplorerPanelProps) {
             <Skeleton className="h-8 w-full" />
           </div>
         ) : (
-          <Accordion type="multiple" defaultValue={valoresAbiertos}>
+          // `key` fuerza un remount de Radix Accordion (y por lo tanto una
+          // relectura de `defaultValue`) cada vez que cambia el conjunto de
+          // grupos que deberian estar abiertos -- Radix solo respeta
+          // `defaultValue` en el montaje inicial, nunca en actualizaciones
+          // posteriores. Sin esto, buscar un despacho cuya seccion el
+          // usuario habia colapsado a mano no la volvia a abrir: el item
+          // coincidia pero quedaba oculto dentro de un Accordion cerrado.
+          // Entre un cambio de busqueda/despacho activo y el siguiente, la
+          // key se mantiene estable, asi que los toggles manuales del
+          // usuario se preservan como siempre (sigue siendo no-controlado).
+          <Accordion type="multiple" defaultValue={valoresAbiertos} key={valoresAbiertos.join(",")}>
             {grupos.map((grupo) => {
               const info = ESTADO_INFO[grupo.estado];
               return (
