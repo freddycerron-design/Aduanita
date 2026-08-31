@@ -13,9 +13,20 @@ export function useSession(): void {
   const setSession = useAuthStore((state) => state.setSession);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-    });
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        setSession(data.session);
+      })
+      .catch((error: unknown) => {
+        // Sin esto, un fallo de red/URL invalida deja el status en
+        // "loading" para siempre -- RequireAuth se queda mostrando
+        // "Cargando sesion..." de por vida en vez de caer al login.
+        // Falla "abierto" hacia unauthenticated: peor caso es pedir login
+        // de nuevo, no un colgado silencioso.
+        console.error("No se pudo obtener la sesion inicial de Supabase:", error);
+        setSession(null);
+      });
 
     const { data: subscripcion } = supabase.auth.onAuthStateChange((_evento, session) => {
       setSession(session);
