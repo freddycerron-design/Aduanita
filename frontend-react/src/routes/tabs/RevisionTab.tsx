@@ -39,6 +39,10 @@ const DOCUMENTOS_MINIMOS: TipoDocumento[] = ["FACTURA", "BL"];
 
 const TODAS_SEVERIDADES: Severidad[] = ["ALTA", "MEDIA", "NINGUNA"];
 
+/** Orden de criticidad para la lista de hallazgos: ALTA primero, luego
+ * MEDIA, luego NINGUNA. */
+const ORDEN_SEVERIDAD: Record<Severidad, number> = { ALTA: 0, MEDIA: 1, NINGUNA: 2 };
+
 /** Clases literales (no interpoladas) para que el escaner de Tailwind las
  * genere -- estilo de cada chip de filtro cuando esta activo, un color por
  * severidad igual al de `SEVERIDAD_INFO`. */
@@ -67,7 +71,9 @@ export function RevisionTab({ idDespacho, estadoDespacho, documentos, validacion
   const minimosOk = DOCUMENTOS_MINIMOS.every((tipo) => documentos.some((d) => d.tipo_documento === tipo));
   const puedeProcesar = puedeEnviarAClasificacion(perfil?.rol);
   const esEstadoRevision = estadoDespacho === "REVISION_DOC";
-  const validacionesFiltradas = validaciones.filter((v) => filtroSeveridad.includes(v.severidad));
+  const validacionesFiltradas = validaciones
+    .filter((v) => filtroSeveridad.includes(v.severidad))
+    .sort((a, b) => ORDEN_SEVERIDAD[a.severidad] - ORDEN_SEVERIDAD[b.severidad]);
 
   function alternarFiltroSeveridad(severidad: Severidad) {
     setFiltroSeveridad((actual) =>
