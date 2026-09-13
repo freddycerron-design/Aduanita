@@ -15,6 +15,11 @@ export interface ClassificationHeroProps {
    * (verde/amber/rojo) y, si no se pasa `etiquetaSecundaria`, tambien su
    * texto. */
   confianza?: NivelConfianza;
+  /** Score numerico 0-1 del que se deriva `confianza` (ver
+   * services/gemini_classifier.py::_derivar_nivel_confianza). Opcional --
+   * el hero simplificado de un despacho cerrado (fallback a `decision`,
+   * que no guarda el score original) no lo pasa. */
+  scoreConfianza?: number;
   /** Texto del badge cuando se quiere mostrar algo distinto al nivel de
    * confianza (p.ej. "APROBADO"/"EDITADO" en el hero simplificado de un
    * despacho ya cerrado, reusando el color de `confianza` para conservar
@@ -40,6 +45,7 @@ export interface ClassificationHeroProps {
 export function ClassificationHero({
   subpartida,
   confianza,
+  scoreConfianza,
   etiquetaSecundaria,
   sustentoLegal,
   sustentoLabel,
@@ -54,6 +60,11 @@ export function ClassificationHero({
         <div className="flex flex-wrap items-center gap-3">
           <span className="font-mono text-2xl font-bold tracking-tight text-texto">{subpartida}</span>
           {etiqueta && <Badge variant={variante}>{etiqueta}</Badge>}
+          {scoreConfianza !== undefined && (
+            <span className="text-sm font-semibold text-texto-secundario">
+              {Math.round(scoreConfianza * 100)}% de confianza
+            </span>
+          )}
         </div>
         {sustentoLegal && (
           <p className="text-sm leading-relaxed text-texto-secundario">

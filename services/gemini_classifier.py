@@ -18,10 +18,34 @@ from services.rag_service import Antecedente
 
 NivelConfianza = Literal["ALTA", "MEDIA", "BAJA"]
 
+# Umbrales para derivar nivel_confianza (categorico) desde score_confianza
+# (numerico 0-1). Se derivan en Python en vez de pedirle ambos campos a
+# Gemini -- pedirle los dos por separado corria el riesgo de que se
+# contradigan entre si (ej. score_confianza=0.55 pero nivel_confianza=ALTA).
+UMBRAL_CONFIANZA_ALTA = 0.85
+UMBRAL_CONFIANZA_MEDIA = 0.6
 
-class PropuestaClasificacion(BaseModel):
+
+def _derivar_nivel_confianza(score: float) -> NivelConfianza:
+    if score >= UMBRAL_CONFIANZA_ALTA:
+        return "ALTA"
+    if score >= UMBRAL_CONFIANZA_MEDIA:
+        return "MEDIA"
+    return "BAJA"
+
+
+class _PropuestaClasificacionIA(BaseModel):
+    """Shape que se le pide a Gemini -- `score_confianza` numerico en vez
+    de la categoria `nivel_confianza` directamente (ver PropuestaClasificacion
+    mas abajo, que se arma en `clasificar()` derivando la categoria de este
+    score)."""
+
     subpartida_sugerida: str = Field(description="Subpartida nacional en formato NNNN.NN.NN.NN")
-    nivel_confianza: NivelConfianza
+    score_confianza: float = Field(
+        ge=0,
+        le=1,
+        description="Confianza propia en la clasificacion propuesta, de 0 (muy insegura) a 1 (muy segura)",
+    )
     informacion_faltante_alert: list[str] = Field(
         default_factory=list,
         description="Datos tecnicos que faltan para confirmar la clasificacion (composicion, uso, material, funcion, etc.)",
@@ -29,6 +53,19 @@ class PropuestaClasificacion(BaseModel):
     sustento_legal_rgi: str = Field(
         description="Sustento legal citando la(s) Regla(s) General(es) de Interpretacion (RGI 1 a 6) aplicadas"
     )
+
+
+class PropuestaClasificacion(BaseModel):
+    """Propuesta final expuesta al resto del backend y al frontend.
+    `nivel_confianza` NUNCA se le pide directamente a Gemini -- se deriva
+    de `score_confianza` (ver `_derivar_nivel_confianza`) para que las dos
+    senales de confianza nunca se contradigan entre si."""
+
+    subpartida_sugerida: str
+    score_confianza: float = Field(description="0 (muy insegura) a 1 (muy segura)")
+    nivel_confianza: NivelConfianza
+    informacion_faltante_alert: list[str] = Field(default_factory=list)
+    sustento_legal_rgi: str
 
 
 def _formatear_antecedentes(antecedentes: list[Antecedente]) -> str:
@@ -85,8 +122,9 @@ def construir_prompt_clasificacion(
         "1. Si la informacion tecnica disponible (composicion, material, uso, funcion) no alcanza para "
         "confirmar la subpartida con certeza, dilo explicitamente en 'informacion_faltante_alert' listando "
         "que dato falta pedir al cliente.\n"
-        "2. 'nivel_confianza' debe ser BAJA si falta informacion tecnica relevante, MEDIA si hay ambiguedad "
-        "razonable entre 2 subpartidas cercanas, y ALTA solo si la evidencia es clara.\n"
+        "2. 'score_confianza' debe ser bajo (cercano a 0) si falta informacion tecnica relevante, medio "
+        "(alrededor de 0.5-0.7) si hay ambiguedad razonable entre 2 subpartidas cercanas, y alto (cercano a 1) "
+        "solo si la evidencia es clara.\n"
         "3. 'sustento_legal_rgi' debe citar la o las reglas generales de interpretacion aplicadas y una "
         "justificacion breve.\n"
         "4. Aun con informacion incompleta, siempre debes proponer la subpartida que consideres mas probable "
@@ -121,9 +159,16 @@ def clasificar(
         contents=[prompt],
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
-            response_json_schema=PropuestaClasificacion.model_json_schema(),
+            response_json_schema=_PropuestaClasificacionIA.model_json_schema(),
         ),
     )
 
     datos = _texto_a_json(respuesta.text)
-    return PropuestaClasificacion.model_validate(datos)
+    propuesta_ia = _PropuestaClasificacionIA.model_validate(datos)
+    return PropuestaClasificacion(
+        subpartida_sugerida=propuesta_ia.subpartida_sugerida,
+        score_confianza=propuesta_ia.score_confianza,
+        nivel_confianza=_derivar_nivel_confianza(propuesta_ia.score_confianza),
+        informacion_faltante_alert=propuesta_ia.informacion_faltante_alert,
+        sustento_legal_rgi=propuesta_ia.sustento_legal_rgi,
+    )

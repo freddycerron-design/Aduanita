@@ -79,6 +79,10 @@ export interface ResultadoValidacionOut {
 
 export interface PropuestaClasificacionOut {
   subpartida_sugerida: string;
+  /** 0 (muy insegura) a 1 (muy segura) -- `nivel_confianza` se deriva de
+   * este valor en el backend (services/gemini_classifier.py), nunca al
+   * reves, asi que las dos senales de confianza nunca se contradicen. */
+  score_confianza: number;
   nivel_confianza: NivelConfianza;
   informacion_faltante_alert: string[];
   sustento_legal_rgi: string;

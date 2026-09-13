@@ -84,6 +84,7 @@ export function ClasificacionTab({
           <ClassificationHero
             subpartida={clasificacion.subpartida_sugerida}
             confianza={clasificacion.nivel_confianza}
+            scoreConfianza={clasificacion.score_confianza}
             sustentoLabel="Sustento legal (RGI):"
             sustentoLegal={clasificacion.sustento_legal_rgi}
           />
@@ -137,6 +138,7 @@ export function ClasificacionTab({
       <ClassificationHero
         subpartida={clasificacion.subpartida_sugerida}
         confianza={clasificacion.nivel_confianza}
+        scoreConfianza={clasificacion.score_confianza}
         sustentoLabel="Sustento legal (RGI):"
         sustentoLegal={clasificacion.sustento_legal_rgi}
       />
