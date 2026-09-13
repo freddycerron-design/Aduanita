@@ -13,6 +13,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 from app.config import GEMINI_MODEL_TEXTO_Y_VISION, get_genai_client
+from services.arancel_service import SubpartidaCandidata
 from services.pdf_processor import FacturaItem
 from services.rag_service import Antecedente
 
@@ -103,10 +104,24 @@ def _formatear_items(items: list[FacturaItem]) -> str:
     return "\n".join(bloques)
 
 
+def _formatear_candidatas_arancel(candidatas: list[SubpartidaCandidata]) -> str:
+    """Renderiza las subpartidas candidatas recuperadas del Arancel Nacional
+    oficial (busqueda de texto completo, ver arancel_service.py) --
+    ordenadas por relevancia textual, no por certeza de que sea la
+    correcta: son candidatas a EVALUAR con las RGI, no una respuesta ya
+    decidida."""
+    if not candidatas:
+        return "No se encontraron subpartidas candidatas por texto en el Arancel Nacional para esta mercancia."
+
+    bloques = [f"- {c.codigo}: {c.descripcion}" for c in candidatas]
+    return "\n".join(bloques)
+
+
 def construir_prompt_clasificacion(
     descripcion_mercancia: str,
     items_factura: list[FacturaItem],
     antecedentes: list[Antecedente],
+    candidatas_arancel: list[SubpartidaCandidata],
 ) -> str:
     return (
         "Eres un agente de aduanas experto en clasificacion arancelaria bajo el Arancel de Aduanas de Peru "
@@ -115,6 +130,11 @@ def construir_prompt_clasificacion(
         "Generales de Interpretacion (RGI 1 a 6) del Sistema Armonizado.\n\n"
         f"--- DESCRIPCION GENERAL DE LA MERCANCIA ---\n{descripcion_mercancia}\n\n"
         f"--- ITEMS DETALLADOS EN LA FACTURA ---\n{_formatear_items(items_factura)}\n\n"
+        f"--- SUBPARTIDAS CANDIDATAS DEL ARANCEL NACIONAL OFICIAL (2022) ---\n"
+        f"(recuperadas por coincidencia de texto con la descripcion de la mercancia -- son candidatas a "
+        f"evaluar aplicando las RGI, no una respuesta ya decidida; el arancel ad-valorem que citan puede "
+        f"haber cambiado desde 2022, no lo repitas como dato vigente)\n"
+        f"{_formatear_candidatas_arancel(candidatas_arancel)}\n\n"
         f"--- ANTECEDENTES DE CLASIFICACIONES SIMILARES YA VALIDADAS POR ESPECIALISTAS ---\n"
         f"(ordenados de mayor a menor relevancia; da mas peso a los que provienen de una correccion humana, "
         f"ya que corrigen un error previo de la IA)\n{_formatear_antecedentes(antecedentes)}\n\n"
@@ -128,7 +148,10 @@ def construir_prompt_clasificacion(
         "3. 'sustento_legal_rgi' debe citar la o las reglas generales de interpretacion aplicadas y una "
         "justificacion breve.\n"
         "4. Aun con informacion incompleta, siempre debes proponer la subpartida que consideres mas probable "
-        "en 'subpartida_sugerida' (nunca la dejes vacia)."
+        "en 'subpartida_sugerida' (nunca la dejes vacia).\n"
+        "5. Las subpartidas candidatas del Arancel Nacional son un punto de partida util, pero no asumas que "
+        "una de ellas es necesariamente correcta solo por aparecer en la lista -- evaluala con las RGI igual "
+        "que cualquier otra opcion."
     )
 
 
@@ -144,9 +167,16 @@ def clasificar(
     descripcion_mercancia: str,
     items_factura: list[FacturaItem],
     antecedentes: list[Antecedente],
+    candidatas_arancel: list[SubpartidaCandidata] | None = None,
 ) -> PropuestaClasificacion:
-    """Genera la propuesta de subpartida arancelaria con salida estructurada."""
-    prompt = construir_prompt_clasificacion(descripcion_mercancia, items_factura, antecedentes)
+    """Genera la propuesta de subpartida arancelaria con salida estructurada.
+
+    `candidatas_arancel` es opcional (default None -> lista vacia) para no
+    romper llamadores existentes/pruebas que todavia no la pasan; en el
+    pipeline real (`app/main.py::_ejecutar_clasificacion`) siempre se pasa."""
+    prompt = construir_prompt_clasificacion(
+        descripcion_mercancia, items_factura, antecedentes, candidatas_arancel or []
+    )
 
     # Se usa response_json_schema (JSON Schema serializado) en vez del
     # antiguo response_schema (clase Pydantic directa): es el parametro

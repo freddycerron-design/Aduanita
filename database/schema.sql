@@ -424,3 +424,99 @@ alter table public.reglas_validacion enable row level security;
 -- escribe aqui.
 create policy "auth_select_reglas_validacion" on public.reglas_validacion
     for select using ((select auth.role()) = 'authenticated');
+
+
+-- ---------------------------------------------------------------------
+-- 11. partidas_arancelarias
+-- ---------------------------------------------------------------------
+-- Nomenclador del Arancel de Aduanas del Peru 2022 (D.S. 404-2021-EF),
+-- cargado por scripts/importar_arancel.py (parseo del PDF oficial de
+-- SUNAT -- no existe una version CSV/API oficial). Se usa como fuente de
+-- CANDIDATAS para el clasificador (services/arancel_service.py), no como
+-- fuente de verdad de la tasa vigente (el ad_valorem de este documento
+-- puede haber quedado desactualizado por decretos puntuales posteriores).
+create table public.partidas_arancelarias (
+    codigo        text primary key,
+    descripcion   text not null,
+    ad_valorem    numeric,
+    creado_en     timestamptz not null default now(),
+    search_vector tsvector generated always as (to_tsvector('spanish', descripcion)) stored
+);
+
+create index partidas_arancelarias_search_idx on public.partidas_arancelarias using gin (search_vector);
+
+comment on table public.partidas_arancelarias is
+    'Nomenclador oficial (Arancel de Aduanas del Peru 2022) usado como candidatas de '
+    'contexto para el clasificador, via busqueda de texto completo (sin embeddings -- '
+    'evita miles de llamadas a la API de Gemini). No representa la tasa arancelaria '
+    'vigente garantizada, solo una referencia -- ver scripts/importar_arancel.py.';
+comment on column public.partidas_arancelarias.codigo is
+    'Subpartida nacional de 10 digitos, formato NNNN.NN.NN.NN.';
+comment on column public.partidas_arancelarias.descripcion is
+    'Combina el texto de la partida (4 digitos) mas el texto propio de la subpartida '
+    'nacional -- simplificacion deliberada, no guarda la jerarquia intermedia completa '
+    '(6/8 digitos). Ver scripts/importar_arancel.py para el detalle del parseo.';
+
+alter table public.partidas_arancelarias enable row level security;
+
+create policy "auth_select_partidas_arancelarias" on public.partidas_arancelarias
+    for select using ((select auth.role()) = 'authenticated');
+
+-- Sin policies de insert/update/delete para "authenticated": es una tabla
+-- de referencia que solo carga scripts/importar_arancel.py con
+-- service_role, igual criterio que el resto de tablas de pipeline.
+
+
+-- ---------------------------------------------------------------------
+-- 12. RPC: buscar_partidas_candidatas
+-- ---------------------------------------------------------------------
+-- Busqueda de texto completo con semantica OR sobre partidas_arancelarias
+-- (via el operador || entre tsquery, uno por palabra) -- una descripcion
+-- comercial real ("microscopios opticos de laboratorio, marca Zeiss")
+-- casi nunca calza palabra por palabra con la terminologia legal terse
+-- del arancel, asi que con AND (plainto_tsquery normal) no devuelve nada;
+-- con OR, ts_rank igual prioriza arriba las filas que calzan mas palabras.
+-- plainto_tsquery() nunca lanza error de sintaxis con texto arbitrario (a
+-- diferencia de to_tsquery() con el texto crudo), por eso se arma la
+-- consulta palabra por palabra con esa funcion antes de combinarlas.
+create or replace function public.buscar_partidas_candidatas(
+    consulta text,
+    limite   int default 8
+)
+returns table (
+    codigo      text,
+    descripcion text,
+    ad_valorem  numeric,
+    rank        real
+)
+language plpgsql
+stable
+set search_path = public
+as $$
+declare
+    palabra text;
+    consulta_tsquery tsquery := ''::tsquery;
+begin
+    foreach palabra in array regexp_split_to_array(trim(coalesce(consulta, '')), '\s+') loop
+        if length(palabra) > 2 then
+            consulta_tsquery := consulta_tsquery || plainto_tsquery('spanish', palabra);
+        end if;
+    end loop;
+
+    if consulta_tsquery = ''::tsquery then
+        return;
+    end if;
+
+    return query
+        select p.codigo, p.descripcion, p.ad_valorem,
+               ts_rank(p.search_vector, consulta_tsquery) as rank
+        from public.partidas_arancelarias p
+        where p.search_vector @@ consulta_tsquery
+        order by rank desc
+        limit limite;
+end;
+$$;
+
+comment on function public.buscar_partidas_candidatas is
+    'Full-text search con semantica OR (no AND) sobre partidas_arancelarias -- '
+    'ver services/arancel_service.py::buscar_subpartidas_candidatas.';

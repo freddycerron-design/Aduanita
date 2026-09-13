@@ -9,6 +9,10 @@ __pycache__/
 # PDFs de prueba generados localmente
 pdfs_prueba/
 
+# Cache local del PDF del Arancel de Aduanas (scripts/importar_arancel.py
+# lo descarga aca si se corre sin pasarle una ruta local)
+.arancel_2022_cache.pdf
+
 # Archivos de IDE
 .vscode/
 .idea/

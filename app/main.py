@@ -41,6 +41,7 @@ from pydantic import BaseModel, Field, ValidationError
 from supabase import Client
 
 from app.config import get_settings, get_supabase_admin_client, get_supabase_user_client
+from services.arancel_service import buscar_subpartidas_candidatas
 from services.email_draft_service import (
     DespachoInfo,
     actualizar_borrador_editado,
@@ -445,7 +446,8 @@ def _ejecutar_clasificacion(admin: Client, id_despacho: str) -> PropuestaClasifi
         ],
     }
     antecedentes = buscar_antecedentes(admin, factura.descripcion_mercancia, atributos)
-    propuesta = clasificar(factura.descripcion_mercancia, factura.items, antecedentes)
+    candidatas_arancel = buscar_subpartidas_candidatas(admin, factura.descripcion_mercancia)
+    propuesta = clasificar(factura.descripcion_mercancia, factura.items, antecedentes, candidatas_arancel)
 
     _cache_clasificaciones[id_despacho] = propuesta
     _cache_info_suficiente[id_despacho] = info_suficiente
