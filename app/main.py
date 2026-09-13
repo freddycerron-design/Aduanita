@@ -36,6 +36,7 @@ from typing import Literal
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel, Field, ValidationError
 from supabase import Client
 
@@ -46,6 +47,7 @@ from services.email_draft_service import (
     generar_borrador,
     guardar_borrador,
 )
+from services.export_service import generar_excel_despacho
 from services.gemini_classifier import PropuestaClasificacion, clasificar
 from services.pdf_processor import TIPO_A_SCHEMA, TipoDocumento, procesar_documento
 from services.rag_service import buscar_antecedentes, guardar_feedback
@@ -509,9 +511,12 @@ def listar_despachos(
     return consulta.execute().data or []
 
 
-@app.get("/despachos/{id_despacho}", response_model=DespachoDetalleOut)
-def obtener_despacho(id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_user)) -> dict:
-    admin = get_supabase_admin_client()
+def _armar_detalle_despacho(admin: Client, id_despacho: str) -> dict:
+    """Arma el detalle completo de un despacho (despacho + documentos +
+    validaciones + clasificacion en cache + borrador + decision
+    persistida). Compartido por `obtener_despacho` (respuesta JSON normal)
+    y `exportar_despacho_excel` (mismos datos, formato .xlsx) -- una sola
+    fuente de verdad para no repetir las mismas 3 consultas dos veces."""
     despacho = _obtener_despacho_o_404(admin, id_despacho)
     documentos = _obtener_documentos_extraidos(admin, id_despacho)
     validaciones = _obtener_validaciones(admin, id_despacho)
@@ -545,6 +550,29 @@ def obtener_despacho(id_despacho: str, usuario: UsuarioAutenticado = Depends(get
         "borrador": borrador,
         "decision": decision,
     }
+
+
+@app.get("/despachos/{id_despacho}", response_model=DespachoDetalleOut)
+def obtener_despacho(id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_user)) -> dict:
+    admin = get_supabase_admin_client()
+    return _armar_detalle_despacho(admin, id_despacho)
+
+
+@app.get("/despachos/{id_despacho}/exportar-excel")
+def exportar_despacho_excel(id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_user)) -> Response:
+    """Exporta los mismos datos de `obtener_despacho` a un libro de Excel
+    (4 hojas: Despacho, Documentos, Validaciones, Clasificación). La
+    exportacion a JSON no tiene endpoint propio -- el frontend ya tiene
+    ese mismo detalle cargado y arma el archivo del lado del cliente."""
+    admin = get_supabase_admin_client()
+    detalle = _armar_detalle_despacho(admin, id_despacho)
+    contenido = generar_excel_despacho(detalle)
+    nombre_archivo = f"despacho_{detalle['despacho']['numero_despacho']}.xlsx"
+    return Response(
+        content=contenido,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'},
+    )
 
 
 @app.post("/despachos/{id_despacho}/documentos", response_model=DocumentoExtraidoOut)

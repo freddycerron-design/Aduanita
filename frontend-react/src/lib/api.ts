@@ -99,6 +99,30 @@ async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): Promise
   return (await respuesta.json()) as T;
 }
 
+/**
+ * Variante de `apiFetch` para respuestas binarias (archivos para
+ * descargar) -- mismo manejo de token/401 que `apiFetch`, pero devuelve
+ * un `Blob` en vez de parsear JSON.
+ */
+async function apiFetchBlob(path: string): Promise<Blob> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  const headers: HeadersInit = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const respuesta = await fetch(new URL(path, API_BASE_URL).toString(), { headers });
+
+  if (respuesta.status === 401) {
+    await supabase.auth.signOut();
+    window.location.href = "/login";
+    throw new ApiError(401, "Sesion expirada. Vuelve a iniciar sesion.");
+  }
+  if (!respuesta.ok) {
+    throw new ApiError(respuesta.status, await mensajeDeError(respuesta));
+  }
+  return respuesta.blob();
+}
+
 // --- despachos --------------------------------------------------------
 
 export function listarDespachos(estado?: EstadoDespacho): Promise<DespachoOut[]> {
@@ -189,4 +213,14 @@ export function actualizarReglaValidacion(
 
 export function eliminarReglaValidacion(idRegla: string): Promise<{ status: string }> {
   return apiFetch<{ status: string }>(`/admin/reglas-validacion/${idRegla}`, { method: "DELETE" });
+}
+
+// --- exportar despacho ---------------------------------------------------------
+
+/** El export a JSON no pega al backend -- se arma client-side a partir
+ * del `DespachoDetalleOut` ya cargado (ver hooks/useExportarDespacho.ts).
+ * Esto es el unico que necesita ida y vuelta al servidor (generar un
+ * .xlsx real requiere una libreria server-side). */
+export function descargarExcelDespacho(idDespacho: string): Promise<Blob> {
+  return apiFetchBlob(`/despachos/${idDespacho}/exportar-excel`);
 }

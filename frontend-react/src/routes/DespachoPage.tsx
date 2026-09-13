@@ -2,6 +2,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 
 import { useDespachoDetalle } from "@/hooks/useDespachoDetalle";
 import { DespachoHeader } from "@/components/layout/DespachoHeader";
+import { ExportarDespachoBotones } from "@/components/despacho/ExportarDespachoBotones";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RevisionTab } from "@/routes/tabs/RevisionTab";
@@ -55,7 +56,9 @@ export function DespachoPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <DespachoHeader despacho={detalle.despacho} />
+      <DespachoHeader despacho={detalle.despacho}>
+        <ExportarDespachoBotones detalle={detalle} />
+      </DespachoHeader>
       <div className="flex-1 overflow-y-auto p-6">
         <Tabs value={tabActivo} onValueChange={(valor) => irATab(valor as TabValue)}>
           <TabsList>
