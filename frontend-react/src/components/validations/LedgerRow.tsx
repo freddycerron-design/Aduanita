@@ -39,7 +39,7 @@ export function LedgerRow({ resultado }: { resultado: ResultadoValidacionOut }) 
       <div className="flex flex-1 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
         <Badge variant={info.variant}>{resultado.severidad}</Badge>
         <p className="text-sm leading-snug text-texto">
-          <span className="font-mono font-semibold text-coral">{resultado.regla}</span>
+          <span className={cn("font-mono font-semibold", info.color)}>{resultado.regla}</span>
           {" — "}
           {resultado.detalle}
         </p>
