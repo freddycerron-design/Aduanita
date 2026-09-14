@@ -96,8 +96,8 @@ export function RevisionTab({ idDespacho, estadoDespacho, documentos, validacion
         <div>
           <h2 className="text-sm font-semibold text-texto">Documentos</h2>
           <p className="text-xs text-texto-secundario">
-            Cargar solo sube el PDF (rápido, sin extraer datos todavía). Cuando termines, presiona &quot;Procesar
-            información&quot; para extraer, validar y clasificar todo de una vez.
+            Cargar solo sube el archivo, PDF o foto (rápido, sin extraer datos todavía). Cuando termines, presiona
+            &quot;Procesar información&quot; para extraer, validar y clasificar todo de una vez.
           </p>
         </div>
 

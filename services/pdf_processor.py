@@ -1,20 +1,28 @@
 """
 Extraccion de datos estructurados desde los tipos de documentos de un
-despacho (FACTURA, SEGURO, SWIFT_BANCARIO, BL, PACKING_LIST).
+despacho (FACTURA, SEGURO, SWIFT_BANCARIO, BL, PACKING_LIST). Acepta
+tanto PDF como imagenes (JPG/PNG/WEBP) -- es comun que un especialista
+solo tenga una foto del documento fisico, no un PDF.
 
-Estrategia de dos pasos:
-1. PyMuPDF (fitz) extrae el texto crudo del PDF (rapido, gratis, sin
-   llamadas a red). PyMuPDF NO hace NLP: solo entrega texto plano.
-2. Gemini 1.5 Flash estructura ese texto en el schema Pydantic
-   correspondiente (`response_schema`, salida JSON). Si el texto extraido
-   es nulo o de mala calidad (tipico de un PDF escaneado sin capa de
-   texto), se usa Gemini Vision sobre las paginas renderizadas como
-   imagenes en su lugar.
+El tipo real del archivo se detecta por su firma binaria ("magic bytes"),
+nunca por la extension del nombre ni por el Content-Type que declare el
+navegador (ambos pueden faltar o venir equivocados). Con eso se elige la
+estrategia de extraccion:
 
-Se usa Gemini para estructurar incluso el camino "texto" porque
-PyMuPDF por si solo no entiende el contenido del documento; Gemini en
-modo texto es mas barato/rapido que en modo vision, por eso se prefiere
-cuando el texto disponible es de buena calidad.
+1. **PDF**: PyMuPDF (fitz) extrae primero el texto crudo (rapido, gratis,
+   sin llamadas a red -- PyMuPDF NO hace NLP, solo entrega texto plano).
+   Si esa capa de texto es nula o de mala calidad (tipico de un PDF
+   escaneado), se renderizan las paginas como imagenes y se usa Gemini
+   Vision sobre ellas en su lugar.
+2. **Imagen (JPG/PNG/WEBP)**: no existe una capa de texto que extraer ni
+   paginas que renderizar -- se va directo a Gemini Vision sobre el
+   archivo tal cual fue subido.
+
+En ambos casos la estructuracion final la hace Gemini 1.5 Flash contra el
+schema Pydantic correspondiente (`response_json_schema`, salida JSON).
+Se prefiere el modo texto sobre vision cuando hay un PDF con texto de
+buena calidad porque es mas barato/rapido, pero el resultado final
+(un objeto Pydantic validado) es identico sin importar el camino tomado.
 """
 from __future__ import annotations
 
@@ -43,6 +51,48 @@ UMBRAL_RATIO_ALFANUMERICO = 0.5
 class ExtraccionFallidaError(Exception):
     """Se lanza cuando ni el camino de texto ni el de vision logran producir
     una estructura valida contra el schema Pydantic esperado."""
+
+
+class TipoArchivoNoSoportadoError(Exception):
+    """Se lanza cuando el archivo subido no es un PDF ni una imagen
+    reconocible (JPG/PNG/WEBP) segun su firma binaria."""
+
+
+# Firmas binarias ("magic bytes") de los formatos soportados. Se comparan
+# contra el inicio del archivo en vez de confiar en la extension del
+# nombre o el Content-Type declarado por el navegador -- ninguno de los
+# dos es confiable (un especialista puede subir una foto renombrada, o el
+# navegador puede no declarar Content-Type en absoluto).
+_FIRMA_PDF = b"%PDF-"
+_FIRMA_JPEG = b"\xff\xd8\xff"
+_FIRMA_PNG = b"\x89PNG\r\n\x1a\n"
+_FIRMA_RIFF = b"RIFF"
+_FIRMA_WEBP = b"WEBP"
+
+EXTENSION_POR_MIME: dict[str, str] = {
+    "application/pdf": "pdf",
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+}
+
+
+def detectar_tipo_contenido(contenido: bytes) -> str:
+    """Determina el tipo MIME real de un archivo a partir de sus primeros
+    bytes. Devuelve uno de los tipos soportados (ver EXTENSION_POR_MIME) o
+    lanza TipoArchivoNoSoportadoError si no coincide con ninguna firma
+    conocida."""
+    if contenido.startswith(_FIRMA_PDF):
+        return "application/pdf"
+    if contenido.startswith(_FIRMA_JPEG):
+        return "image/jpeg"
+    if contenido.startswith(_FIRMA_PNG):
+        return "image/png"
+    if contenido.startswith(_FIRMA_RIFF) and contenido[8:12] == _FIRMA_WEBP:
+        return "image/webp"
+    raise TipoArchivoNoSoportadoError(
+        "El archivo no es un PDF ni una imagen reconocible (JPG/PNG/WEBP)."
+    )
 
 
 # ---------------------------------------------------------------------
@@ -260,13 +310,14 @@ def estructurar_texto_con_gemini(texto: str, tipo_documento: TipoDocumento) -> d
     return _generar_structured_output(contenidos, schema)
 
 
-def extraer_con_gemini_vision(imagenes: list[bytes], tipo_documento: TipoDocumento) -> dict:
-    """Estructura el documento a partir de sus paginas renderizadas como
-    imagenes, usando Gemini Vision. Camino de respaldo para PDFs
-    escaneados sin capa de texto util."""
+def extraer_con_gemini_vision(imagenes: list[tuple[bytes, str]], tipo_documento: TipoDocumento) -> dict:
+    """Estructura el documento a partir de una o mas imagenes (bytes,
+    mime_type), usando Gemini Vision. Se usa tanto para las paginas
+    renderizadas de un PDF escaneado (sin capa de texto util) como para un
+    documento que ya llego como foto/imagen desde un principio."""
     schema = TIPO_A_SCHEMA[tipo_documento]
     prompt = _prompt_estructuracion(tipo_documento)
-    partes_imagen = [types.Part.from_bytes(data=img, mime_type="image/png") for img in imagenes]
+    partes_imagen = [types.Part.from_bytes(data=img, mime_type=mime) for img, mime in imagenes]
     contenidos = [prompt, *partes_imagen]
     return _generar_structured_output(contenidos, schema)
 
@@ -275,35 +326,60 @@ def extraer_con_gemini_vision(imagenes: list[bytes], tipo_documento: TipoDocumen
 # Orquestador
 # ---------------------------------------------------------------------
 
-def procesar_documento(pdf_bytes: bytes, tipo_documento: TipoDocumento) -> tuple[BaseModel, str]:
-    """Procesa un PDF de principio a fin y devuelve (objeto_pydantic_validado, metodo_extraccion).
+def procesar_documento(contenido: bytes, tipo_documento: TipoDocumento) -> tuple[BaseModel, str]:
+    """Procesa un documento (PDF o imagen) de principio a fin y devuelve
+    (objeto_pydantic_validado, metodo_extraccion).
 
-    metodo_extraccion es 'PYMUPDF' si se pudo estructurar a partir del texto
-    extraido por PyMuPDF, o 'GEMINI_VISION' si hubo que recurrir a las
-    imagenes de las paginas (PDF escaneado o texto de mala calidad).
+    Primero se detecta el tipo real del archivo por su firma binaria (ver
+    `detectar_tipo_contenido`), nunca por la extension del nombre, para
+    elegir la estrategia adecuada:
+
+    - PDF: intenta el camino de texto (PyMuPDF + Gemini texto) y cae a
+      Gemini Vision sobre las paginas renderizadas si el texto es nulo o
+      de mala calidad (PDF escaneado).
+    - Imagen (JPG/PNG/WEBP): va directo a Gemini Vision sobre el archivo
+      tal cual, no hay capa de texto ni paginas que renderizar.
+
+    metodo_extraccion es 'PYMUPDF' si se pudo estructurar a partir del
+    texto extraido por PyMuPDF, o 'GEMINI_VISION' si hubo que recurrir a
+    imagenes (PDF escaneado, texto de mala calidad, o el documento ya era
+    una imagen desde un principio).
     """
     schema = TIPO_A_SCHEMA[tipo_documento]
-    texto = extraer_texto_pymupdf(pdf_bytes)
+    mime = detectar_tipo_contenido(contenido)
 
-    if calidad_texto_suficiente(texto):
+    if mime == "application/pdf":
+        texto = extraer_texto_pymupdf(contenido)
+
+        if calidad_texto_suficiente(texto):
+            try:
+                datos = estructurar_texto_con_gemini(texto, tipo_documento)
+                return schema.model_validate(datos), "PYMUPDF"
+            except Exception:
+                # Si la estructuracion por texto falla (p.ej. Gemini no pudo
+                # cumplir el schema con el texto disponible, o hubo un error
+                # de red/API), se intenta el camino de vision como ultimo
+                # recurso antes de fallar.
+                pass
+
         try:
-            datos = estructurar_texto_con_gemini(texto, tipo_documento)
-            return schema.model_validate(datos), "PYMUPDF"
-        except Exception:
-            # Si la estructuracion por texto falla (p.ej. Gemini no pudo
-            # cumplir el schema con el texto disponible, o hubo un error
-            # de red/API), se intenta el camino de vision como ultimo
-            # recurso antes de fallar.
-            pass
+            imagenes = [(img, "image/png") for img in pdf_a_imagenes(contenido)]
+            datos = extraer_con_gemini_vision(imagenes, tipo_documento)
+            return schema.model_validate(datos), "GEMINI_VISION"
+        except Exception as error:
+            # Cualquier falla en el ultimo recurso (schema invalido, error de
+            # red/API de Gemini, JSON malformado, etc.) se reporta como una
+            # extraccion fallida explicita en vez de propagar un error 500 crudo.
+            raise ExtraccionFallidaError(
+                f"No fue posible extraer un {tipo_documento} valido del PDF: {error}"
+            ) from error
 
+    # Ya es una imagen (JPG/PNG/WEBP): no hay capa de texto que intentar
+    # primero, se estructura directo con Gemini Vision.
     try:
-        imagenes = pdf_a_imagenes(pdf_bytes)
-        datos = extraer_con_gemini_vision(imagenes, tipo_documento)
+        datos = extraer_con_gemini_vision([(contenido, mime)], tipo_documento)
         return schema.model_validate(datos), "GEMINI_VISION"
     except Exception as error:
-        # Cualquier falla en el ultimo recurso (schema invalido, error de
-        # red/API de Gemini, JSON malformado, etc.) se reporta como una
-        # extraccion fallida explicita en vez de propagar un error 500 crudo.
         raise ExtraccionFallidaError(
-            f"No fue posible extraer un {tipo_documento} valido del PDF: {error}"
+            f"No fue posible extraer un {tipo_documento} valido de la imagen: {error}"
         ) from error

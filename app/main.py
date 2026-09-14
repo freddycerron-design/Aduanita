@@ -50,7 +50,14 @@ from services.email_draft_service import (
 )
 from services.export_service import generar_excel_despacho
 from services.gemini_classifier import PropuestaClasificacion, clasificar
-from services.pdf_processor import TIPO_A_SCHEMA, TipoDocumento, procesar_documento
+from services.pdf_processor import (
+    TIPO_A_SCHEMA,
+    EXTENSION_POR_MIME,
+    TipoArchivoNoSoportadoError,
+    TipoDocumento,
+    detectar_tipo_contenido,
+    procesar_documento,
+)
 from services.rag_service import buscar_antecedentes, guardar_feedback
 from services.validation_engine import (
     ParametrosIgualdadExacta,
@@ -584,25 +591,50 @@ def subir_documento(
     archivo: UploadFile = File(...),
     usuario: UsuarioAutenticado = Depends(get_current_user),
 ) -> dict:
-    """Sube el PDF a Storage y registra un marcador 'pendiente de procesar'
-    -- NO llama a Gemini aqui (por eso es rapida). La extraccion real se
-    hace en bloque, para todos los documentos pendientes del despacho a la
-    vez, al presionar "Procesar informacion" (ver enviar_a_clasificacion /
-    _ejecutar_extraccion_pendiente). Si ya existia un documento de este
-    tipo, subir uno nuevo lo reemplaza automaticamente (upsert)."""
+    """Sube el documento (PDF o imagen) a Storage y registra un marcador
+    'pendiente de procesar' -- NO llama a Gemini aqui (por eso es rapida).
+    La extraccion real se hace en bloque, para todos los documentos
+    pendientes del despacho a la vez, al presionar "Procesar informacion"
+    (ver enviar_a_clasificacion / _ejecutar_extraccion_pendiente). Si ya
+    existia un documento de este tipo, subir uno nuevo lo reemplaza
+    automaticamente (upsert); la decision de que estrategia de extraccion
+    usar (texto de PDF vs. Gemini Vision) se toma recien en ese paso, en
+    `services.pdf_processor.procesar_documento`.
+
+    El tipo real del archivo (PDF/JPG/PNG/WEBP) se detecta por su firma
+    binaria, no por la extension del nombre ni el Content-Type del
+    navegador -- ver `pdf_processor.detectar_tipo_contenido`."""
     admin = get_supabase_admin_client()
     _obtener_despacho_o_404(admin, id_despacho)  # 404 si el despacho no existe
 
     if tipo_documento not in TIPO_A_SCHEMA:
         raise HTTPException(status_code=400, detail=f"tipo_documento invalido: {tipo_documento}")
 
-    pdf_bytes = archivo.file.read()
-    if not pdf_bytes:
+    contenido = archivo.file.read()
+    if not contenido:
         raise HTTPException(status_code=400, detail="El archivo subido esta vacio.")
 
-    path_storage = f"{id_despacho}/{tipo_documento}.pdf"
+    try:
+        mime = detectar_tipo_contenido(contenido)
+    except TipoArchivoNoSoportadoError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    path_storage = f"{id_despacho}/{tipo_documento}.{EXTENSION_POR_MIME[mime]}"
+
+    # Si ya existia un documento de este tipo con OTRA extension (p.ej. se
+    # habia subido un PDF y ahora se reemplaza por una foto JPG), el nuevo
+    # path no pisa al anterior -- hay que borrar el objeto viejo a mano
+    # para no dejarlo huerfano en Storage.
+    filas_previas = _obtener_documentos_extraidos(admin, id_despacho)
+    fila_previa = next((f for f in filas_previas if f["tipo_documento"] == tipo_documento), None)
+    if fila_previa and fila_previa["url_pdf_storage"] != path_storage:
+        try:
+            admin.storage.from_(settings.supabase_storage_bucket).remove([fila_previa["url_pdf_storage"]])
+        except Exception:
+            pass  # si ya no existia en Storage, no es un error
+
     admin.storage.from_(settings.supabase_storage_bucket).upload(
-        path_storage, pdf_bytes, {"content-type": "application/pdf", "upsert": "true"}
+        path_storage, contenido, {"content-type": mime, "upsert": "true"}
     )
 
     fila = {
@@ -636,11 +668,15 @@ def eliminar_documento(
     admin = get_supabase_admin_client()
     _obtener_despacho_o_404(admin, id_despacho)
 
-    path_storage = f"{id_despacho}/{tipo_documento}.pdf"
-    try:
-        admin.storage.from_(settings.supabase_storage_bucket).remove([path_storage])
-    except Exception:
-        pass  # si el archivo ya no existia en Storage, no es un error
+    # El path real depende de la extension del archivo subido (PDF, JPG,
+    # PNG...), por eso se lee de la fila en vez de asumir ".pdf".
+    filas = _obtener_documentos_extraidos(admin, id_despacho)
+    fila = next((f for f in filas if f["tipo_documento"] == tipo_documento), None)
+    if fila:
+        try:
+            admin.storage.from_(settings.supabase_storage_bucket).remove([fila["url_pdf_storage"]])
+        except Exception:
+            pass  # si el archivo ya no existia en Storage, no es un error
 
     admin.table("documentos_extraidos").delete().eq("id_despacho", id_despacho).eq(
         "tipo_documento", tipo_documento

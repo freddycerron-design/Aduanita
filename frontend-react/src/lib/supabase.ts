@@ -17,8 +17,10 @@ export const supabaseConfigError =
     ? "Faltan las variables de entorno VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY en este despliegue."
     : null;
 
-/** Bucket privado donde el backend guarda los PDFs subidos
- * (`{id_despacho}/{tipo_documento}.pdf`), ver app/main.py::subir_documento. */
+/** Bucket privado donde el backend guarda los documentos subidos --
+ * PDF o imagen segun lo que suba el especialista
+ * (`{id_despacho}/{tipo_documento}.{pdf|jpg|png|webp}`), ver
+ * app/main.py::subir_documento. */
 export const SUPABASE_STORAGE_BUCKET =
   import.meta.env.VITE_SUPABASE_STORAGE_BUCKET || "documentos-aduaneros";
 

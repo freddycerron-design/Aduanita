@@ -19,12 +19,15 @@ export interface DocumentUploadCardProps {
 }
 
 /**
- * Tarjeta de carga para un tipo de documento. Subir es inmediato al
- * elegir el archivo (no hay boton "Confirmar"): el input nativo dispara
+ * Tarjeta de carga para un tipo de documento. Acepta tanto PDF como fotos
+ * (JPG/PNG/WEBP) del documento fisico -- el backend detecta el tipo real
+ * del archivo por su contenido y elige la mejor estrategia de extraccion,
+ * asi que aqui no hace falta distinguirlos. Subir es inmediato al elegir
+ * el archivo (no hay boton "Confirmar"): el input nativo dispara
  * `onChange` una sola vez por seleccion real del usuario, asi que no hace
  * falta ningun mecanismo de deduplicacion (a diferencia del hack con
  * `file.file_id` que necesitaba la version Streamlit para evitar
- * re-subidas en cada rerun del script). Un PDF nuevo del mismo tipo
+ * re-subidas en cada rerun del script). Un archivo nuevo del mismo tipo
  * reemplaza al anterior automaticamente (el backend hace upsert).
  */
 export function DocumentUploadCard({ idDespacho, tipo, documento, disabled }: DocumentUploadCardProps) {
@@ -54,8 +57,8 @@ export function DocumentUploadCard({ idDespacho, tipo, documento, disabled }: Do
     : eliminar.isPending
       ? "Eliminando..."
       : cargado
-        ? "Reemplazar PDF"
-        : "Elegir PDF";
+        ? "Reemplazar archivo"
+        : "Elegir PDF o foto";
 
   return (
     <Card>
@@ -84,7 +87,7 @@ export function DocumentUploadCard({ idDespacho, tipo, documento, disabled }: Do
         <input
           ref={inputRef}
           type="file"
-          accept="application/pdf"
+          accept="application/pdf,image/jpeg,image/png,image/webp"
           className="hidden"
           onChange={manejarSeleccion}
         />

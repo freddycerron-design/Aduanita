@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileJson, FileText } from "lucide-react";
+import { FileJson, Image as ImageIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { TIPOS_DOCUMENTO } from "@/lib/types";
@@ -8,7 +8,7 @@ import { useSignedPdfUrl } from "@/hooks/useSignedPdfUrl";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
-type ModoVisor = "JSON" | "PDF";
+type ModoVisor = "JSON" | "ORIGINAL";
 
 export interface DocumentViewerProps {
   documentos: DocumentoExtraidoOut[];
@@ -91,10 +91,14 @@ export function DocumentViewer({ documentos }: DocumentViewerProps) {
 }
 
 /** Una ventana individual del visor: encabezado con el tipo + toggle
- * JSON/PDF propio, y el contenido segun el modo elegido. */
+ * JSON/original propio, y el contenido segun el modo elegido. El
+ * "original" puede ser un PDF o una foto (JPG/PNG/WEBP) -- se distingue
+ * por la extension del path guardado para elegir entre <iframe> (PDF) e
+ * <img> (imagen) al mostrarlo. */
 function DocumentPane({ tipo, documento }: { tipo: TipoDocumento; documento: DocumentoExtraidoOut }) {
   const [modo, setModo] = useState<ModoVisor>("JSON");
-  const signedUrl = useSignedPdfUrl(documento.url_pdf_storage, modo === "PDF");
+  const signedUrl = useSignedPdfUrl(documento.url_pdf_storage, modo === "ORIGINAL");
+  const esImagen = /\.(jpg|jpeg|png|webp)$/i.test(documento.url_pdf_storage);
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
@@ -115,11 +119,11 @@ function DocumentPane({ tipo, documento }: { tipo: TipoDocumento; documento: Doc
           <Button
             type="button"
             size="sm"
-            variant={modo === "PDF" ? "primary" : "outline"}
-            onClick={() => setModo("PDF")}
+            variant={modo === "ORIGINAL" ? "primary" : "outline"}
+            onClick={() => setModo("ORIGINAL")}
           >
-            <FileText />
-            PDF
+            <ImageIcon />
+            Original
           </Button>
         </div>
       </div>
@@ -148,15 +152,23 @@ function DocumentPane({ tipo, documento }: { tipo: TipoDocumento; documento: Doc
         <Skeleton className="h-[480px] w-full" />
       ) : signedUrl.isError ? (
         <p className="rounded-xl border border-rojo/40 bg-rojo/10 p-4 text-sm text-rojo">
-          No se pudo generar la vista previa del PDF
+          No se pudo generar la vista previa del documento
           {signedUrl.error instanceof Error ? `: ${signedUrl.error.message}` : "."}
         </p>
       ) : signedUrl.data ? (
-        <iframe
-          src={signedUrl.data}
-          className="h-[480px] w-full rounded-xl border border-border"
-          title={`PDF ${tipo}`}
-        />
+        esImagen ? (
+          <img
+            src={signedUrl.data}
+            className="h-[480px] w-full rounded-xl border border-border object-contain bg-surface"
+            alt={`Documento original: ${tipo}`}
+          />
+        ) : (
+          <iframe
+            src={signedUrl.data}
+            className="h-[480px] w-full rounded-xl border border-border"
+            title={`Documento original: ${tipo}`}
+          />
+        )
       ) : null}
     </div>
   );
