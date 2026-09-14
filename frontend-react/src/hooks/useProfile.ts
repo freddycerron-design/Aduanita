@@ -16,7 +16,7 @@ async function obtenerPerfil(userId: string): Promise<PerfilEspecialista> {
   return data as PerfilEspecialista;
 }
 
-/** Rol del usuario autenticado (ESPECIALISTA/LIQUIDADOR/ADMIN), leido de
+/** Rol del usuario autenticado (GESTOR/LIQUIDADOR/ADMIN), leido de
  * `perfiles_especialista` -- RLS permite a cualquier autenticado leer esa
  * tabla, igual que en el dashboard de Streamlit. `staleTime: Infinity`
  * porque el rol no cambia durante una sesion; se re-consulta solo si

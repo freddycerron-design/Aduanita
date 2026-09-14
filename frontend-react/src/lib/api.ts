@@ -18,6 +18,9 @@ import type {
   ReglaValidacionOut,
   ReglaValidacionUpsert,
   TipoDocumento,
+  UsuarioCreate,
+  UsuarioOut,
+  UsuarioUpdate,
 } from "@/lib/types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
@@ -272,6 +275,24 @@ export function actualizarCargoEspecial(
 
 export function eliminarCargoEspecial(idCargo: string): Promise<{ status: string }> {
   return apiFetch<{ status: string }>(`/admin/cargos-especiales-arancel/${idCargo}`, { method: "DELETE" });
+}
+
+// --- usuarios y roles (admin) ---------------------------------------------------------
+
+export function listarUsuarios(): Promise<UsuarioOut[]> {
+  return apiFetch<UsuarioOut[]>("/admin/usuarios");
+}
+
+export function crearUsuario(datos: UsuarioCreate): Promise<UsuarioOut> {
+  return apiFetch<UsuarioOut>("/admin/usuarios", { method: "POST", json: datos });
+}
+
+export function actualizarUsuario(idUsuario: string, datos: UsuarioUpdate): Promise<UsuarioOut> {
+  return apiFetch<UsuarioOut>(`/admin/usuarios/${idUsuario}`, { method: "PUT", json: datos });
+}
+
+export function eliminarUsuario(idUsuario: string): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>(`/admin/usuarios/${idUsuario}`, { method: "DELETE" });
 }
 
 // --- exportar despacho ---------------------------------------------------------

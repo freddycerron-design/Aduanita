@@ -16,4 +16,7 @@ export const queryKeys = {
   cargosEspeciales: {
     list: () => ["cargos-especiales-arancel"] as const,
   },
+  usuarios: {
+    list: () => ["usuarios"] as const,
+  },
 };

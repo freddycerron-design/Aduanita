@@ -14,7 +14,7 @@ export const TIPOS_DOCUMENTO: TipoDocumento[] = ["FACTURA", "SEGURO", "SWIFT_BAN
 
 export type EstadoDespacho = "REVISION_DOC" | "CLASIFICACION" | "FINALIZADO";
 
-export type Rol = "ESPECIALISTA" | "LIQUIDADOR" | "ADMIN";
+export type Rol = "GESTOR" | "LIQUIDADOR" | "ADMIN";
 
 export type Severidad = "ALTA" | "MEDIA" | "NINGUNA";
 
@@ -260,4 +260,30 @@ export interface ReglaValidacionOut extends ReglaValidacionUpsert {
   id: string;
   creado_en: string;
   actualizado_en: string;
+}
+
+// --- usuarios y roles (admin) ---------------------------------------
+
+export interface UsuarioOut {
+  id: string;
+  email: string | null;
+  nombre_completo: string;
+  rol: Rol;
+  activo: boolean;
+  creado_en: string;
+}
+
+export interface UsuarioCreate {
+  email: string;
+  password: string;
+  nombre_completo: string;
+  rol: Rol;
+}
+
+export interface UsuarioUpdate {
+  nombre_completo: string;
+  rol: Rol;
+  activo: boolean;
+  /** Si se omite (undefined/vacío), no se toca la contraseña actual. */
+  password?: string | null;
 }

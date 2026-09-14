@@ -4,8 +4,9 @@ import { Plus, ShieldAlert } from "lucide-react";
 import { useProfile } from "@/hooks/useProfile";
 import { useReglasValidacion } from "@/hooks/useReglasValidacion";
 import { useCargosEspeciales } from "@/hooks/useCargosEspeciales";
+import { useUsuarios } from "@/hooks/useUsuarios";
 import { esAdmin } from "@/lib/roles";
-import type { CargoEspecialArancelOut, ReglaValidacionOut } from "@/lib/types";
+import type { CargoEspecialArancelOut, ReglaValidacionOut, UsuarioOut } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -13,23 +14,29 @@ import { ReglaValidacionForm } from "@/components/admin/ReglaValidacionForm";
 import { ReglasValidacionTable } from "@/components/admin/ReglasValidacionTable";
 import { CargoEspecialForm } from "@/components/admin/CargoEspecialForm";
 import { CargosEspecialesTable } from "@/components/admin/CargosEspecialesTable";
+import { UsuarioForm } from "@/components/admin/UsuarioForm";
+import { UsuariosTable } from "@/components/admin/UsuariosTable";
 
 /**
  * Panel de administracion: CRUD de reglas de validacion (el motor
  * generico que reemplaza las 5 funciones hardcodeadas de
  * services/validation_engine.py) + CRUD de cargos especiales del arancel
  * (antidumping/derecho especifico por subpartida, usados como default en
- * la pestaña Pre-liquidación). Gating inline como el resto del app (sin
+ * la pestaña Pre-liquidación) + CRUD de usuarios y roles (Gestor/
+ * Liquidador/Administrador). Gating inline como el resto del app (sin
  * guard de ruta por rol) -- si no es ADMIN, mensaje en vez de las tablas.
  */
 export function AdminPage() {
   const { data: perfil, isLoading: perfilCargando } = useProfile();
   const { data: reglas, isLoading: reglasCargando } = useReglasValidacion();
   const { data: cargos, isLoading: cargosCargando } = useCargosEspeciales();
+  const { data: usuarios, isLoading: usuariosCargando } = useUsuarios();
   const [dialogoAbierto, setDialogoAbierto] = useState(false);
   const [reglaEditando, setReglaEditando] = useState<ReglaValidacionOut | null>(null);
   const [dialogoCargoAbierto, setDialogoCargoAbierto] = useState(false);
   const [cargoEditando, setCargoEditando] = useState<CargoEspecialArancelOut | null>(null);
+  const [dialogoUsuarioAbierto, setDialogoUsuarioAbierto] = useState(false);
+  const [usuarioEditando, setUsuarioEditando] = useState<UsuarioOut | null>(null);
 
   if (perfilCargando) {
     return (
@@ -45,8 +52,8 @@ export function AdminPage() {
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
         <ShieldAlert className="size-10 text-texto-secundario" strokeWidth={1.5} />
         <p className="text-sm text-texto-secundario">
-          No tienes permiso para ver esta página. Solo un administrador puede gestionar las reglas de
-          validación.
+          No tienes permiso para ver esta página. Solo un administrador puede gestionar reglas de
+          validación, cargos especiales del arancel y usuarios.
         </p>
       </div>
     );
@@ -70,6 +77,16 @@ export function AdminPage() {
   function abrirEditarCargo(cargo: CargoEspecialArancelOut) {
     setCargoEditando(cargo);
     setDialogoCargoAbierto(true);
+  }
+
+  function abrirCrearUsuario() {
+    setUsuarioEditando(null);
+    setDialogoUsuarioAbierto(true);
+  }
+
+  function abrirEditarUsuario(usuario: UsuarioOut) {
+    setUsuarioEditando(usuario);
+    setDialogoUsuarioAbierto(true);
   }
 
   return (
@@ -120,6 +137,30 @@ export function AdminPage() {
       )}
 
       <CargoEspecialForm open={dialogoCargoAbierto} onOpenChange={setDialogoCargoAbierto} cargo={cargoEditando} />
+
+      <Separator className="my-8" />
+
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-4">
+        <div>
+          <h1 className="text-base font-semibold text-texto">Usuarios y roles</h1>
+          <p className="text-sm text-texto-secundario">
+            Altas, bajas y cambios de rol (Gestor / Liquidador / Administrador). Crear pone la
+            contraseña directamente; eliminar borra la cuenta por completo.
+          </p>
+        </div>
+        <Button type="button" onClick={abrirCrearUsuario}>
+          <Plus className="size-4" />
+          Nuevo usuario
+        </Button>
+      </div>
+
+      {usuariosCargando ? (
+        <Skeleton className="h-64 w-full" />
+      ) : (
+        <UsuariosTable usuarios={usuarios ?? []} onEditar={abrirEditarUsuario} />
+      )}
+
+      <UsuarioForm open={dialogoUsuarioAbierto} onOpenChange={setDialogoUsuarioAbierto} usuario={usuarioEditando} />
     </div>
   );
 }

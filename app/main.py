@@ -10,13 +10,13 @@ Maquina de estados del despacho (3 estados, dos roles distintos):
                                                                  guarda el archivo, no llama a Gemini)
   3. DELETE /despachos/{id}/documentos/{tipo}               -> quitar un documento ya cargado (opcional;
                                                                  subir uno nuevo del mismo tipo tambien lo reemplaza)
-  4. POST /despachos/{id}/procesar-informacion              -> ESPECIALISTA, boton "Procesar informacion":
+  4. POST /despachos/{id}/procesar-informacion              -> GESTOR, boton "Procesar informacion":
                                                                  extrae (Gemini) los documentos pendientes +
                                                                  valida + clasifica (RAG+Gemini) + genera
                                                                  borrador. NO cambia el estado (se queda en
                                                                  REVISION_DOC): se puede reprocesar cuantas
                                                                  veces haga falta antes de enviar a clasificar.
-  5. POST /despachos/{id}/enviar-a-clasificacion            -> ESPECIALISTA, boton propio "Enviar a
+  5. POST /despachos/{id}/enviar-a-clasificacion            -> GESTOR, boton propio "Enviar a
                                                                  Clasificacion": exige FACTURA+BL ya procesados
                                                                  -> estado=CLASIFICACION. Es la unica accion
                                                                  que mueve el despacho fuera de REVISION_DOC.
@@ -37,6 +37,11 @@ DELETE) es el CRUD del motor de reglas de validacion cruzada -- las
 reglas que antes eran funciones Python hardcodeadas en
 services/validation_engine.py ahora son filas de la tabla
 reglas_validacion, interpretadas genericamente por ese mismo modulo.
+/admin/cargos-especiales-arancel (GET/POST/PUT/DELETE) es el CRUD de
+tasas de antidumping/derecho especifico por subpartida (ver
+Pre-liquidacion). /admin/usuarios (GET/POST/PUT/DELETE) es el CRUD de
+usuarios y roles (GESTOR/LIQUIDADOR/ADMIN) via la API de Auth de
+Supabase -- crea/edita/elimina la cuenta real, no solo el perfil.
 """
 from __future__ import annotations
 
@@ -128,7 +133,7 @@ class UsuarioAutenticado(BaseModel):
 def get_current_user(authorization: str = Header(...)) -> UsuarioAutenticado:
     """Valida el JWT de Supabase Auth enviado en el header Authorization
     (formato 'Bearer <token>') y devuelve el usuario autenticado, incluyendo
-    su rol de negocio (ESPECIALISTA/LIQUIDADOR/ADMIN) desde perfiles_especialista."""
+    su rol de negocio (GESTOR/LIQUIDADOR/ADMIN) desde perfiles_especialista."""
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Falta el header 'Authorization: Bearer <token>'.")
 
@@ -145,7 +150,7 @@ def get_current_user(authorization: str = Header(...)) -> UsuarioAutenticado:
     perfil = (
         admin.table("perfiles_especialista").select("rol").eq("id", resultado.user.id).execute()
     )
-    rol = perfil.data[0]["rol"] if perfil.data else "ESPECIALISTA"
+    rol = perfil.data[0]["rol"] if perfil.data else "GESTOR"
 
     return UsuarioAutenticado(id=resultado.user.id, email=resultado.user.email, rol=rol, access_token=token)
 
@@ -329,6 +334,35 @@ class PreliquidacionDetalleOut(BaseModel):
     preliquidacion: PreliquidacionOut | None
     subpartida_vigente: str | None
     cargo_especial_default: CargoEspecialArancelOut | None
+
+
+RolUsuario = Literal["GESTOR", "LIQUIDADOR", "ADMIN"]
+
+
+class UsuarioOut(BaseModel):
+    id: str
+    email: str | None
+    nombre_completo: str
+    rol: RolUsuario
+    activo: bool
+    creado_en: str
+
+
+class UsuarioCreate(BaseModel):
+    email: str
+    password: str
+    nombre_completo: str
+    rol: RolUsuario
+
+
+class UsuarioUpdate(BaseModel):
+    nombre_completo: str
+    rol: RolUsuario
+    activo: bool
+    # Si viene, resetea la contrasena de Auth; si no, se ignora (no se
+    # puede "vaciar" una contrasena, omitir el campo es la forma de no
+    # tocarla).
+    password: str | None = None
 
 
 # ---------------------------------------------------------------------
@@ -727,7 +761,7 @@ def calcular_preliquidacion_despacho(
     snapshot en `preliquidaciones` (upsert por id_despacho). El especialista
     o el liquidador pueden hacerlo -- no esta atado a una unica transicion
     de estado, se puede recalcular cuantas veces haga falta."""
-    _requiere_rol(usuario, {"ESPECIALISTA", "LIQUIDADOR"})
+    _requiere_rol(usuario, {"GESTOR", "LIQUIDADOR"})
 
     admin = get_supabase_admin_client()
     _obtener_despacho_o_404(admin, id_despacho)
@@ -979,7 +1013,7 @@ def procesar_informacion(
     (ver `enviar_a_clasificacion` mas abajo). Es el unico punto donde se
     llama a Gemini para extraccion: subir_documento solo guarda el archivo
     (rapido, sin extraer)."""
-    _requiere_rol(usuario, {"ESPECIALISTA"})
+    _requiere_rol(usuario, {"GESTOR"})
 
     admin = get_supabase_admin_client()
     despacho = _obtener_despacho_o_404(admin, id_despacho)
@@ -1007,7 +1041,7 @@ def enviar_a_clasificacion(
     exige que FACTURA y BL ya esten procesados (mismo criterio que
     DOCUMENTOS_MINIMOS en el frontend) y mueve el estado, dejando el
     despacho listo para que el liquidador lo revise."""
-    _requiere_rol(usuario, {"ESPECIALISTA"})
+    _requiere_rol(usuario, {"GESTOR"})
 
     admin = get_supabase_admin_client()
     despacho = _obtener_despacho_o_404(admin, id_despacho)
@@ -1172,4 +1206,109 @@ def eliminar_cargo_especial(
     admin = get_supabase_admin_client()
     _obtener_cargo_especial_o_404(admin, id_cargo)
     admin.table("cargos_especiales_arancel").delete().eq("id", id_cargo).execute()
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------
+# Administracion (solo ADMIN): CRUD de usuarios y roles
+# ---------------------------------------------------------------------
+# A diferencia de reglas_validacion/cargos_especiales_arancel (filas
+# comunes de Postgres), un "usuario" es una cuenta real de Supabase Auth
+# -- crear/eliminar pasa por `admin.auth.admin.*`, no por un simple
+# insert/delete en una tabla. `perfiles_especialista` (rol, nombre,
+# activo) se mantiene en sincronia con esas llamadas.
+
+def _obtener_perfil_o_404(admin: Client, id_usuario: str) -> dict:
+    respuesta = admin.table("perfiles_especialista").select("*").eq("id", id_usuario).execute()
+    if not respuesta.data:
+        raise HTTPException(status_code=404, detail=f"No existe un usuario con id {id_usuario}.")
+    return respuesta.data[0]
+
+
+def _contar_admins(admin: Client) -> int:
+    respuesta = admin.table("perfiles_especialista").select("id", count="exact").eq("rol", "ADMIN").execute()
+    return respuesta.count or 0
+
+
+def _verificar_no_es_ultimo_admin(admin: Client, perfil: dict) -> None:
+    """Salvaguarda anti-lockout: si el usuario objetivo es ADMIN y es el
+    unico que queda, no se puede degradar su rol ni eliminarlo -- dejaria
+    la app sin nadie que pueda administrarla."""
+    if perfil["rol"] == "ADMIN" and _contar_admins(admin) <= 1:
+        raise HTTPException(
+            status_code=400,
+            detail="No se puede eliminar ni cambiar el rol del único administrador restante.",
+        )
+
+
+@app.get("/admin/usuarios", response_model=list[UsuarioOut])
+def listar_usuarios(usuario: UsuarioAutenticado = Depends(get_current_user)) -> list[dict]:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    perfiles = admin.table("perfiles_especialista").select("*").order("creado_en").execute().data or []
+    emails_por_id = {u.id: u.email for u in admin.auth.admin.list_users()}
+    return [{**perfil, "email": emails_por_id.get(perfil["id"])} for perfil in perfiles]
+
+
+@app.post("/admin/usuarios", response_model=UsuarioOut)
+def crear_usuario(datos: UsuarioCreate, usuario: UsuarioAutenticado = Depends(get_current_user)) -> dict:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+
+    try:
+        respuesta_auth = admin.auth.admin.create_user(
+            {"email": datos.email, "password": datos.password, "email_confirm": True}
+        )
+    except Exception as error:
+        raise HTTPException(status_code=400, detail=f"No se pudo crear el usuario: {error}") from error
+
+    id_usuario = respuesta_auth.user.id
+    # El trigger handle_new_user() (database/schema.sql) ya creo la fila de
+    # perfiles_especialista con nombre_completo=email y rol=GESTOR (default
+    # de la columna) -- se actualiza de inmediato con los valores reales.
+    admin.table("perfiles_especialista").update(
+        {"nombre_completo": datos.nombre_completo, "rol": datos.rol}
+    ).eq("id", id_usuario).execute()
+
+    return {**_obtener_perfil_o_404(admin, id_usuario), "email": datos.email}
+
+
+@app.put("/admin/usuarios/{id_usuario}", response_model=UsuarioOut)
+def actualizar_usuario(
+    id_usuario: str, datos: UsuarioUpdate, usuario: UsuarioAutenticado = Depends(get_current_user)
+) -> dict:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    perfil_actual = _obtener_perfil_o_404(admin, id_usuario)
+
+    if datos.rol != "ADMIN":
+        _verificar_no_es_ultimo_admin(admin, perfil_actual)
+
+    if datos.password:
+        try:
+            admin.auth.admin.update_user_by_id(id_usuario, {"password": datos.password})
+        except Exception as error:
+            raise HTTPException(status_code=400, detail=f"No se pudo actualizar la contraseña: {error}") from error
+
+    admin.table("perfiles_especialista").update(
+        {"nombre_completo": datos.nombre_completo, "rol": datos.rol, "activo": datos.activo}
+    ).eq("id", id_usuario).execute()
+
+    perfil_actualizado = _obtener_perfil_o_404(admin, id_usuario)
+    email = next((u.email for u in admin.auth.admin.list_users() if u.id == id_usuario), None)
+    return {**perfil_actualizado, "email": email}
+
+
+@app.delete("/admin/usuarios/{id_usuario}")
+def eliminar_usuario(id_usuario: str, usuario: UsuarioAutenticado = Depends(get_current_user)) -> dict:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    perfil = _obtener_perfil_o_404(admin, id_usuario)
+    _verificar_no_es_ultimo_admin(admin, perfil)
+
+    try:
+        admin.auth.admin.delete_user(id_usuario)  # cascada: borra tambien perfiles_especialista
+    except Exception as error:
+        raise HTTPException(status_code=400, detail=f"No se pudo eliminar el usuario: {error}") from error
+
     return {"status": "ok"}

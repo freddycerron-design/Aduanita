@@ -49,7 +49,7 @@ export interface ClasificacionTabProps {
  * - CLASIFICACION: hero completo + alerta de informacion faltante +
  *   formulario de decision (gateado a rol LIQUIDADOR). Si `clasificacion`
  *   vino null (cache perdida, p.ej. reinicio del backend) se ofrece
- *   reintentar (gateado a rol ESPECIALISTA, misma accion que "Procesar
+ *   reintentar (gateado a rol GESTOR, misma accion que "Procesar
  *   informacion" en la pestaña 1).
  */
 export function ClasificacionTab({

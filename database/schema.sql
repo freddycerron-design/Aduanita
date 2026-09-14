@@ -23,18 +23,22 @@ create extension if not exists pgcrypto with schema extensions; -- para gen_rand
 create table public.perfiles_especialista (
     id              uuid primary key references auth.users(id) on delete cascade,
     nombre_completo text not null,
-    rol             text not null default 'ESPECIALISTA'
-                        check (rol in ('ESPECIALISTA', 'LIQUIDADOR', 'ADMIN')),
+    rol             text not null default 'GESTOR'
+                        check (rol in ('GESTOR', 'LIQUIDADOR', 'ADMIN')),
     activo          boolean not null default true,
     creado_en       timestamptz not null default now()
 );
 
 comment on table public.perfiles_especialista is
-    'Datos de negocio de cada especialista aduanero que usa el dashboard. 1:1 con auth.users.';
+    'Datos de negocio de cada usuario que usa el dashboard (gestor/liquidador/admin). 1:1 con auth.users.';
 comment on column public.perfiles_especialista.rol is
-    'ESPECIALISTA: sube y valida documentos, envia el despacho a clasificacion. '
-    'LIQUIDADOR: revisa la propuesta de subpartida y la acepta u observa. '
-    'ADMIN: puede realizar cualquier accion de los dos roles anteriores.';
+    'GESTOR: sube y valida documentos, envia el despacho a clasificacion '
+    '(antes se llamaba ESPECIALISTA, renombrado). '
+    'LIQUIDADOR: revisa la propuesta de subpartida, la acepta u observa, y '
+    'calcula la pre-liquidacion de tributos. '
+    'ADMIN: puede realizar cualquier accion de los dos roles anteriores, '
+    'ademas de administrar reglas de validacion, cargos especiales del '
+    'arancel, y usuarios.';
 
 -- Funcion + trigger: al crear un usuario en auth.users, crea su perfil
 -- automaticamente. El nombre completo se toma de raw_user_meta_data si

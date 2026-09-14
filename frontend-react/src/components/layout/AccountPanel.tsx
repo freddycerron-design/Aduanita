@@ -3,6 +3,7 @@ import { CircleUser } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/hooks/useAuthStore";
 import { useProfile } from "@/hooks/useProfile";
+import { ROL_INFO } from "@/lib/roles";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -27,13 +28,18 @@ export function AccountPanel() {
         <CircleUser className="size-8 shrink-0 text-texto-secundario" />
         <div className="flex min-w-0 flex-col gap-1.5">
           <span className="truncate text-sm text-texto">{email ?? "..."}</span>
-          {isLoading ? <Skeleton className="h-5 w-24" /> : <Badge variant="coral">{perfil?.rol ?? "..."}</Badge>}
+          {isLoading ? (
+            <Skeleton className="h-5 w-24" />
+          ) : (
+            <Badge variant="coral">{perfil ? ROL_INFO[perfil.rol].label : "..."}</Badge>
+          )}
         </div>
       </div>
 
       <p className="text-xs text-texto-secundario">
-        El rol define que acciones puedes tomar: el especialista sube documentos y envia a
-        clasificacion; el liquidador acepta u observa la propuesta de subpartida.
+        El rol define que acciones puedes tomar: el gestor sube documentos y envia a
+        clasificacion; el liquidador acepta u observa la propuesta de subpartida y calcula la
+        pre-liquidación.
       </p>
 
       <Separator />
