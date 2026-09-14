@@ -183,7 +183,7 @@ export function RevisionTab({ idDespacho, estadoDespacho, documentos, validacion
         ) : validacionesFiltradas.length === 0 ? (
           <p className="text-sm text-texto-secundario">No hay hallazgos con los filtros seleccionados.</p>
         ) : (
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-1.5">
             {validacionesFiltradas.map((resultado, indice) => (
               <LedgerRow key={`${resultado.regla}-${indice}`} resultado={resultado} />
             ))}

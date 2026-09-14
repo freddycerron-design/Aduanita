@@ -31,15 +31,15 @@ export function LedgerRow({ resultado }: { resultado: ResultadoValidacionOut }) 
   return (
     <div
       className={cn(
-        "flex items-start gap-3 rounded-xl border border-border border-l-4 bg-surface px-4 py-3",
+        "flex items-start gap-2.5 rounded-xl border border-border border-l-4 bg-surface px-3 py-1.5",
         info.borde,
       )}
     >
       <Icono className={cn("mt-0.5 size-4 shrink-0", info.color)} />
-      <div className="flex flex-1 flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-2">
+      <div className="flex flex-1 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
         <Badge variant={info.variant}>{resultado.severidad}</Badge>
-        <p className="text-sm text-texto">
-          <span className="font-mono font-semibold">{resultado.regla}</span>
+        <p className="text-sm leading-snug text-texto">
+          <span className="font-mono font-semibold text-coral">{resultado.regla}</span>
           {" — "}
           {resultado.detalle}
         </p>
