@@ -7,19 +7,20 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RevisionTab } from "@/routes/tabs/RevisionTab";
 import { ClasificacionTab } from "@/routes/tabs/ClasificacionTab";
+import { PreliquidacionTab } from "@/routes/tabs/PreliquidacionTab";
 import { CorreoTab } from "@/routes/tabs/CorreoTab";
 
-type TabValue = "revision" | "clasificacion" | "correo";
-const TABS_VALIDOS: TabValue[] = ["revision", "clasificacion", "correo"];
+type TabValue = "revision" | "clasificacion" | "preliquidacion" | "correo";
+const TABS_VALIDOS: TabValue[] = ["revision", "clasificacion", "preliquidacion", "correo"];
 
 /**
- * Shell del despacho activo: header + las 3 pestanas numeradas. El
+ * Shell del despacho activo: header + las 4 pestanas numeradas. El
  * contenido de cada pestana vive en un componente propio (routes/tabs/*)
- * para que el flujo de Revision, Clasificacion y Correo se puedan
- * desarrollar de forma independiente -- este archivo solo orquesta cual
- * esta visible (sincronizado con ?tab= en la URL, asi que un refresh no
- * pierde la pestana activa) y les pasa los datos ya cargados de
- * `useDespachoDetalle`.
+ * para que el flujo de Revision, Clasificacion, Pre-liquidacion y Correo
+ * se puedan desarrollar de forma independiente -- este archivo solo
+ * orquesta cual esta visible (sincronizado con ?tab= en la URL, asi que
+ * un refresh no pierde la pestana activa) y les pasa los datos ya
+ * cargados de `useDespachoDetalle`.
  */
 export function DespachoPage() {
   const { id } = useParams<{ id: string }>();
@@ -68,7 +69,10 @@ export function DespachoPage() {
             <TabsTrigger value="clasificacion" numero={2}>
               Clasificación
             </TabsTrigger>
-            <TabsTrigger value="correo" numero={3}>
+            <TabsTrigger value="preliquidacion" numero={3}>
+              Pre liquidación
+            </TabsTrigger>
+            <TabsTrigger value="correo" numero={4}>
               Correo
             </TabsTrigger>
           </TabsList>
@@ -79,6 +83,7 @@ export function DespachoPage() {
               estadoDespacho={detalle.despacho.estado}
               documentos={detalle.documentos}
               validaciones={detalle.validaciones}
+              clasificacionLista={detalle.clasificacion !== null}
               onProcesado={() => irATab("clasificacion")}
             />
           </TabsContent>
@@ -91,6 +96,10 @@ export function DespachoPage() {
               clasificacion={detalle.clasificacion}
               decision={detalle.decision}
             />
+          </TabsContent>
+
+          <TabsContent value="preliquidacion">
+            <PreliquidacionTab idDespacho={detalle.despacho.id} documentos={detalle.documentos} />
           </TabsContent>
 
           <TabsContent value="correo">

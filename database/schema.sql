@@ -81,8 +81,7 @@ create table public.despachos (
                         check (estado in (
                             'REVISION_DOC',
                             'CLASIFICACION',
-                            'REVISADO',
-                            'OBSERVADO'
+                            'FINALIZADO'
                         )),
     fecha_creacion  timestamptz not null default now(),
     creado_por      uuid references public.perfiles_especialista(id),
@@ -94,9 +93,11 @@ create index despachos_creado_por_idx on public.despachos (creado_por);
 comment on column public.despachos.estado is
     'Maquina de estados del flujo de negocio: REVISION_DOC (subida y validacion '
     'de documentos, a cargo del especialista) -> CLASIFICACION (el especialista '
-    'envio el despacho a clasificar; se genera la propuesta IA) -> REVISADO '
-    '(el liquidador acepto la propuesta tal cual) u OBSERVADO (el liquidador la '
-    'rechazo/corrigio, con motivo obligatorio).';
+    'envio el despacho a clasificar via el boton Enviar a Clasificacion; se '
+    'genera la propuesta IA) -> FINALIZADO (el liquidador registro su decision, '
+    'aceptando u observando la propuesta -- el detalle de cual de las dos ocurrio '
+    'vive en historial_clasificaciones.tipo_accion (APROBADO/EDITADO), no en '
+    'este campo).';
 
 
 -- ---------------------------------------------------------------------
@@ -520,3 +521,87 @@ $$;
 comment on function public.buscar_partidas_candidatas is
     'Full-text search con semantica OR (no AND) sobre partidas_arancelarias -- '
     'ver services/arancel_service.py::buscar_subpartidas_candidatas.';
+
+
+-- ---------------------------------------------------------------------
+-- 13. cargos_especiales_arancel
+-- ---------------------------------------------------------------------
+-- Tasas de antidumping y derecho especifico por subpartida, cargadas a
+-- mano por un ADMIN -- no existe una fuente oficial CSV/API consolidada
+-- para estos cargos (son resoluciones puntuales de INDECOPI/MEF), a
+-- diferencia del arancel general (partidas_arancelarias) que sale de un
+-- documento oficial completo. Sirve como DEFAULT sugerido al calcular la
+-- pre-liquidacion de un despacho; el especialista/liquidador puede
+-- sobreescribirlo por despacho (ver preliquidaciones abajo).
+create table public.cargos_especiales_arancel (
+    id                       uuid primary key default gen_random_uuid(),
+    subpartida               text not null unique references public.partidas_arancelarias(codigo),
+    antidumping_monto        numeric not null default 0,
+    derecho_especifico_monto numeric not null default 0,
+    moneda                   text not null default 'USD',
+    nota                     text,
+    creado_por               uuid references public.perfiles_especialista(id),
+    creado_en                timestamptz not null default now(),
+    actualizado_en           timestamptz not null default now()
+);
+
+comment on table public.cargos_especiales_arancel is
+    'Tasas de antidumping y derecho especifico por subpartida, cargadas a mano por '
+    'un ADMIN (no hay fuente oficial CSV/API consolidada para estos cargos -- son '
+    'resoluciones puntuales de INDECOPI/MEF). Sirve como DEFAULT sugerido al calcular '
+    'la pre-liquidacion de un despacho; el especialista/liquidador puede sobreescribirlo '
+    'por despacho (ver preliquidaciones). subpartida referencia partidas_arancelarias '
+    'para evitar cargar tasas contra codigos inexistentes.';
+comment on column public.cargos_especiales_arancel.nota is
+    'Texto libre para que el ADMIN documente la fuente/resolucion, p.ej. '
+    '"Res. INDECOPI 123-2024, vigente hasta ...".';
+
+alter table public.cargos_especiales_arancel enable row level security;
+
+-- Mismo patron que reglas_validacion: sin policies de insert/update/delete
+-- para "authenticated", solo el backend (service_role, gateado por
+-- _requiere_rol(usuario, set()) = solo ADMIN) escribe aqui.
+create policy "auth_select_cargos_especiales_arancel" on public.cargos_especiales_arancel
+    for select using ((select auth.role()) = 'authenticated');
+
+
+-- ---------------------------------------------------------------------
+-- 14. preliquidaciones
+-- ---------------------------------------------------------------------
+-- Snapshot editable del calculo de tributos de un despacho (Ad Valorem /
+-- IGV / IPM / antidumping / derecho especifico), uno por despacho. Se
+-- recalcula y sobreescribe (upsert por id_despacho) cada vez que el
+-- especialista/liquidador presiona "Calcular" en la pestana
+-- Pre-liquidacion -- ver services/preliquidacion_service.py y
+-- app/main.py::calcular_preliquidacion.
+create table public.preliquidaciones (
+    id                       uuid primary key default gen_random_uuid(),
+    id_despacho              uuid not null unique references public.despachos(id) on delete cascade,
+    subpartida               text not null,
+    valor_cif                numeric not null,
+    moneda                   text not null default 'USD',
+    ad_valorem_tasa          numeric not null,
+    ad_valorem_monto         numeric not null,
+    base_igv_ipm             numeric not null,
+    igv_monto                numeric not null,
+    ipm_monto                numeric not null,
+    antidumping_monto        numeric not null default 0,
+    derecho_especifico_monto numeric not null default 0,
+    total_tributos           numeric not null,
+    actualizado_por          uuid references public.perfiles_especialista(id),
+    actualizado_en           timestamptz not null default now()
+);
+
+comment on table public.preliquidaciones is
+    'Snapshot editable del calculo de tributos de un despacho (Ad Valorem/IGV/IPM/ '
+    'antidumping/derecho especifico), uno por despacho (unique id_despacho). Se '
+    'recalcula y sobreescribe (upsert) cada vez que el especialista/liquidador '
+    'presiona "Calcular" en la pestana Pre-liquidacion. ad_valorem_tasa guarda el % '
+    'usado en el momento del calculo (snapshot), por si partidas_arancelarias.ad_valorem '
+    'cambia despues. No se aplica tipo de cambio: todos los montos quedan en la moneda '
+    'de valor_cif (normalmente USD) -- limite aceptado, ver app/main.py.';
+
+alter table public.preliquidaciones enable row level security;
+
+create policy "auth_select_preliquidaciones" on public.preliquidaciones
+    for select using ((select auth.role()) = 'authenticated');

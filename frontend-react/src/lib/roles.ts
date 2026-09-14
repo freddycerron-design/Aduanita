@@ -23,6 +23,14 @@ export function puedeDecidirClasificacion(rol: Rol | null | undefined): boolean 
   return tieneRol(rol, ["LIQUIDADOR"]);
 }
 
+/** Puede calcular/recalcular la pre-liquidacion de tributos
+ * (POST /despachos/{id}/preliquidacion/calcular) -- especialista o
+ * liquidador, no es una accion exclusiva de un solo rol como las de
+ * arriba. */
+export function puedeCalcularPreliquidacion(rol: Rol | null | undefined): boolean {
+  return tieneRol(rol, ["ESPECIALISTA", "LIQUIDADOR"]);
+}
+
 /** Acceso al CRUD de reglas de validacion (/admin/reglas-validacion).
  * A diferencia de `tieneRol` (disenada para "rol de negocio O ADMIN"),
  * esto es "solo ADMIN" -- espejo exacto de `_requiere_rol(usuario, set())`

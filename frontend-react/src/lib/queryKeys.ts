@@ -10,4 +10,10 @@ export const queryKeys = {
   reglasValidacion: {
     list: () => ["reglas-validacion"] as const,
   },
+  preliquidacion: {
+    detail: (idDespacho: string) => ["preliquidacion", idDespacho] as const,
+  },
+  cargosEspeciales: {
+    list: () => ["cargos-especiales-arancel"] as const,
+  },
 };

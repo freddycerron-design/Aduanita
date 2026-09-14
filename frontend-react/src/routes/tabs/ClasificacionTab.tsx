@@ -8,7 +8,7 @@ import { MissingInfoAlert } from "@/components/classification/MissingInfoAlert";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useProfile } from "@/hooks/useProfile";
-import { enviarAClasificacion } from "@/lib/api";
+import { procesarInformacion } from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
 import { puedeDecidirClasificacion, puedeEnviarAClasificacion } from "@/lib/roles";
 import type {
@@ -24,23 +24,28 @@ export interface ClasificacionTabProps {
   estadoDespacho: EstadoDespacho;
   documentos: DocumentoExtraidoOut[];
   /** Cache en memoria del backend -- puede venir null (recien enviado a
-   * clasificacion y backend reiniciado, o despacho ya cerrado). */
+   * clasificacion y backend reiniciado, o despacho ya FINALIZADO). */
   clasificacion: PropuestaClasificacionOut | null;
-  /** Decision ya persistida -- fuente de verdad para despachos cerrados
-   * (REVISADO/OBSERVADO), fallback cuando `clasificacion` es null. */
+  /** Decision ya persistida -- fuente de verdad para despachos FINALIZADOs,
+   * fallback cuando `clasificacion` es null. */
   decision: HistorialClasificacionOut | null;
 }
 
 /**
  * Pestaña 2: propuesta de clasificación del clasificador IA + decisión del
- * liquidador. Tres ramas segun `estadoDespacho`, replicando la logica de
- * `tab_clasificacion` en el dashboard.py viejo:
+ * liquidador. Ramas segun `estadoDespacho` + si ya existe `clasificacion`
+ * en cache:
  *
- * - REVISION_DOC: el despacho todavia no tiene propuesta, se apunta a la
- *   pestaña 1.
- * - REVISADO / OBSERVADO: despacho cerrado -- la fuente de verdad es
- *   `decision` (persistida), `clasificacion` (cache en memoria del
- *   backend) se prefiere solo si por algun motivo vino no-null.
+ * - REVISION_DOC sin `clasificacion`: el despacho todavia no fue
+ *   procesado, se apunta a la pestaña 1.
+ * - REVISION_DOC con `clasificacion`: ya se presionó "Procesar
+ *   información" pero todavía no "Enviar a Clasificación" -- vista previa
+ *   de la propuesta (sin formulario de decisión: el liquidador recién
+ *   decide una vez que el estado pasa a CLASIFICACION).
+ * - FINALIZADO: la fuente de verdad es `decision` (persistida);
+ *   `decision.tipo_accion` (APROBADO/EDITADO) reemplaza a lo que antes
+ *   distinguía `estadoDespacho` (REVISADO/OBSERVADO) -- el estado del
+ *   despacho ya no lleva ese detalle.
  * - CLASIFICACION: hero completo + alerta de informacion faltante +
  *   formulario de decision (gateado a rol LIQUIDADOR). Si `clasificacion`
  *   vino null (cache perdida, p.ej. reinicio del backend) se ofrece
@@ -58,7 +63,7 @@ export function ClasificacionTab({
   const queryClient = useQueryClient();
 
   const reintentar = useMutation({
-    mutationFn: () => enviarAClasificacion(idDespacho),
+    mutationFn: () => procesarInformacion(idDespacho),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.despachos.detail(idDespacho) });
       toast.success("Propuesta de clasificación regenerada.");
@@ -68,7 +73,7 @@ export function ClasificacionTab({
     },
   });
 
-  if (estadoDespacho === "REVISION_DOC") {
+  if (estadoDespacho === "REVISION_DOC" && clasificacion === null) {
     return (
       <Aviso tono="info">
         Este despacho aún no fue procesado. Carga los documentos y presiona "Procesar información" en la
@@ -77,7 +82,26 @@ export function ClasificacionTab({
     );
   }
 
-  if (estadoDespacho === "REVISADO" || estadoDespacho === "OBSERVADO") {
+  if (estadoDespacho === "REVISION_DOC" && clasificacion !== null) {
+    return (
+      <div className="flex flex-col gap-4">
+        <ClassificationHero
+          subpartida={clasificacion.subpartida_sugerida}
+          confianza={clasificacion.nivel_confianza}
+          scoreConfianza={clasificacion.score_confianza}
+          sustentoLabel="Sustento legal (RGI):"
+          sustentoLegal={clasificacion.sustento_legal_rgi}
+        />
+        <Aviso tono="info">
+          Propuesta lista. Ve a la pestaña Revisión y presiona &quot;Enviar a Clasificación&quot; para que el
+          liquidador pueda decidir.
+        </Aviso>
+      </div>
+    );
+  }
+
+  if (estadoDespacho === "FINALIZADO") {
+    const aprobada = decision?.tipo_accion === "APROBADO";
     return (
       <div className="flex flex-col gap-4">
         {clasificacion ? (
@@ -91,7 +115,7 @@ export function ClasificacionTab({
         ) : decision ? (
           <ClassificationHero
             subpartida={decision.subpartida_final_humano}
-            confianza={decision.tipo_accion === "APROBADO" ? "ALTA" : "BAJA"}
+            confianza={aprobada ? "ALTA" : "BAJA"}
             etiquetaSecundaria={decision.tipo_accion}
             sustentoLegal="Subpartida final decidida por el liquidador."
           />
@@ -99,16 +123,16 @@ export function ClasificacionTab({
           <Aviso tono="info">No hay información de clasificación disponible para este despacho.</Aviso>
         )}
 
-        {estadoDespacho === "REVISADO" ? (
-          <Aviso tono="exito">
-            Este despacho fue <strong>REVISADO</strong>: el liquidador aceptó la propuesta.
-          </Aviso>
-        ) : (
-          <Aviso tono="atencion">
-            Este despacho fue <strong>OBSERVADO</strong> por el liquidador.
-            {decision?.motivo_modificacion ? ` Motivo: ${decision.motivo_modificacion}` : ""}
-          </Aviso>
-        )}
+        {decision ? (
+          aprobada ? (
+            <Aviso tono="exito">Este despacho fue finalizado: el liquidador aceptó la propuesta tal cual.</Aviso>
+          ) : (
+            <Aviso tono="atencion">
+              Este despacho fue finalizado con observaciones del liquidador.
+              {decision.motivo_modificacion ? ` Motivo: ${decision.motivo_modificacion}` : ""}
+            </Aviso>
+          )
+        ) : null}
       </div>
     );
   }
@@ -168,9 +192,9 @@ const TONOS_AVISO = {
 } as const;
 
 /** Caja de aviso local a esta pestaña (equivalente a los `st.info` /
- * `st.success` / `st.warning` del dashboard viejo), coloreada segun el
- * mismo mapeo semantico de estado que `ESTADO_INFO` (verde=REVISADO,
- * rojo=OBSERVADO, amber=accion pendiente en CLASIFICACION). */
+ * `st.success` / `st.warning` del dashboard viejo): verde=decision
+ * aprobada, rojo=decision observada, amber=accion pendiente en
+ * CLASIFICACION, info=neutro (aun sin propuesta o vista previa). */
 function Aviso({ tono, children }: { tono: keyof typeof TONOS_AVISO; children: ReactNode }) {
   return (
     <div className={cn("rounded-xl border px-4 py-3 text-sm leading-relaxed", TONOS_AVISO[tono])}>

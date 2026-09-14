@@ -2,6 +2,9 @@ import { supabase } from "@/lib/supabase";
 import type {
   ActualizarBorradorRequest,
   BorradorCorreoOut,
+  CalcularPreliquidacionRequest,
+  CargoEspecialArancelOut,
+  CargoEspecialArancelUpsert,
   DecisionRequest,
   DespachoCreate,
   DespachoDetalleOut,
@@ -10,6 +13,8 @@ import type {
   EstadoDespacho,
   HistorialClasificacionOut,
   PipelineResultOut,
+  PreliquidacionDetalleOut,
+  PreliquidacionOut,
   ReglaValidacionOut,
   ReglaValidacionUpsert,
   TipoDocumento,
@@ -164,8 +169,19 @@ export function eliminarDocumento(
 
 // --- pipeline (extraccion + validacion + clasificacion + borrador) --------
 
-export function enviarAClasificacion(idDespacho: string): Promise<PipelineResultOut> {
-  return apiFetch<PipelineResultOut>(`/despachos/${idDespacho}/enviar-a-clasificacion`, {
+/** "Procesar información": extrae + valida + clasifica + genera borrador.
+ * NO cambia el estado del despacho (ver `enviarAClasificacion` para eso). */
+export function procesarInformacion(idDespacho: string): Promise<PipelineResultOut> {
+  return apiFetch<PipelineResultOut>(`/despachos/${idDespacho}/procesar-informacion`, {
+    method: "POST",
+  });
+}
+
+/** Botón propio "Enviar a Clasificación": la única transición
+ * REVISION_DOC -> CLASIFICACION. Exige que ya se haya presionado
+ * "Procesar información" (FACTURA+BL procesados). */
+export function enviarAClasificacion(idDespacho: string): Promise<DespachoOut> {
+  return apiFetch<DespachoOut>(`/despachos/${idDespacho}/enviar-a-clasificacion`, {
     method: "POST",
   });
 }
@@ -213,6 +229,49 @@ export function actualizarReglaValidacion(
 
 export function eliminarReglaValidacion(idRegla: string): Promise<{ status: string }> {
   return apiFetch<{ status: string }>(`/admin/reglas-validacion/${idRegla}`, { method: "DELETE" });
+}
+
+// --- pre-liquidacion de tributos ---------------------------------------------------------
+
+export function obtenerPreliquidacion(idDespacho: string): Promise<PreliquidacionDetalleOut> {
+  return apiFetch<PreliquidacionDetalleOut>(`/despachos/${idDespacho}/preliquidacion`);
+}
+
+export function calcularPreliquidacion(
+  idDespacho: string,
+  datos: CalcularPreliquidacionRequest,
+): Promise<PreliquidacionOut> {
+  return apiFetch<PreliquidacionOut>(`/despachos/${idDespacho}/preliquidacion/calcular`, {
+    method: "POST",
+    json: datos,
+  });
+}
+
+// --- cargos especiales del arancel (admin: antidumping / derecho especifico) --------
+
+export function listarCargosEspeciales(): Promise<CargoEspecialArancelOut[]> {
+  return apiFetch<CargoEspecialArancelOut[]>("/admin/cargos-especiales-arancel");
+}
+
+export function crearCargoEspecial(datos: CargoEspecialArancelUpsert): Promise<CargoEspecialArancelOut> {
+  return apiFetch<CargoEspecialArancelOut>("/admin/cargos-especiales-arancel", {
+    method: "POST",
+    json: datos,
+  });
+}
+
+export function actualizarCargoEspecial(
+  idCargo: string,
+  datos: CargoEspecialArancelUpsert,
+): Promise<CargoEspecialArancelOut> {
+  return apiFetch<CargoEspecialArancelOut>(`/admin/cargos-especiales-arancel/${idCargo}`, {
+    method: "PUT",
+    json: datos,
+  });
+}
+
+export function eliminarCargoEspecial(idCargo: string): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>(`/admin/cargos-especiales-arancel/${idCargo}`, { method: "DELETE" });
 }
 
 // --- exportar despacho ---------------------------------------------------------

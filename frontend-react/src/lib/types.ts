@@ -12,7 +12,7 @@ export type TipoDocumento = "FACTURA" | "SEGURO" | "SWIFT_BANCARIO" | "BL" | "PA
 
 export const TIPOS_DOCUMENTO: TipoDocumento[] = ["FACTURA", "SEGURO", "SWIFT_BANCARIO", "BL", "PACKING_LIST"];
 
-export type EstadoDespacho = "REVISION_DOC" | "CLASIFICACION" | "REVISADO" | "OBSERVADO";
+export type EstadoDespacho = "REVISION_DOC" | "CLASIFICACION" | "FINALIZADO";
 
 export type Rol = "ESPECIALISTA" | "LIQUIDADOR" | "ADMIN";
 
@@ -124,6 +124,56 @@ export interface HistorialClasificacionOut {
   aprobado_por: string;
 }
 
+// --- pre-liquidacion de tributos ---------------------------------------------------------
+
+export interface PreliquidacionOut {
+  id: string;
+  id_despacho: string;
+  subpartida: string;
+  valor_cif: number;
+  moneda: string;
+  ad_valorem_tasa: number;
+  ad_valorem_monto: number;
+  base_igv_ipm: number;
+  igv_monto: number;
+  ipm_monto: number;
+  antidumping_monto: number;
+  derecho_especifico_monto: number;
+  total_tributos: number;
+  actualizado_en: string;
+}
+
+export interface CalcularPreliquidacionRequest {
+  valor_cif: number;
+  moneda?: string;
+  /** Si se omiten, el backend usa el default de cargos_especiales_arancel
+   * para la subpartida vigente (o 0 si tampoco hay default cargado). */
+  antidumping_monto?: number | null;
+  derecho_especifico_monto?: number | null;
+}
+
+export interface PreliquidacionDetalleOut {
+  preliquidacion: PreliquidacionOut | null;
+  subpartida_vigente: string | null;
+  cargo_especial_default: CargoEspecialArancelOut | null;
+}
+
+// --- cargos especiales del arancel (admin: antidumping / derecho especifico) --------
+
+export interface CargoEspecialArancelUpsert {
+  subpartida: string;
+  antidumping_monto: number;
+  derecho_especifico_monto: number;
+  moneda: string;
+  nota?: string | null;
+}
+
+export interface CargoEspecialArancelOut extends CargoEspecialArancelUpsert {
+  id: string;
+  creado_en: string;
+  actualizado_en: string;
+}
+
 // --- detalle compuesto ---------------------------------------------------------
 
 export interface DespachoDetalleOut {
@@ -132,13 +182,16 @@ export interface DespachoDetalleOut {
   validaciones: ResultadoValidacionOut[];
   /** Cache en memoria del backend -- se limpia justo al registrar una
    * decision (ver `registrar_decision` en app/main.py). Para un despacho
-   * ya cerrado (REVISADO/OBSERVADO) esto normalmente viene null y hay que
-   * usar `decision` como fuente de verdad en su lugar. */
+   * ya FINALIZADO esto normalmente viene null y hay que usar `decision`
+   * como fuente de verdad en su lugar. */
   clasificacion: PropuestaClasificacionOut | null;
   borrador: BorradorCorreoOut | null;
   /** Decision ya persistida (historial_clasificaciones), fuente de verdad
-   * para despachos cerrados. */
+   * para despachos FINALIZADOs. */
   decision: HistorialClasificacionOut | null;
+  /** Snapshot ya calculado de la pre-liquidacion (null si aun no se
+   * presiono "Calcular" en esa pestaña). */
+  preliquidacion: PreliquidacionOut | null;
 }
 
 export interface PipelineResultOut {

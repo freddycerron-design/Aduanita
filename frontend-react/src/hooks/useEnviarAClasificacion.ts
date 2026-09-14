@@ -5,13 +5,11 @@ import { enviarAClasificacion } from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
 
 /**
- * Dispara el pipeline completo (extraccion + validacion + clasificacion +
- * borrador) sobre todos los documentos pendientes de un despacho. Puede
- * tardar (llama a Gemini por cada documento) -- el llamador debe usar
- * `isPending` para mostrar un estado de carga claro.
- *
- * Invalida tanto el detalle del despacho como la lista: el estado pasa de
- * REVISION_DOC a CLASIFICACION, lo que afecta el agrupado del Explorer.
+ * Botón propio "Enviar a Clasificación": la única transición
+ * REVISION_DOC -> CLASIFICACION (ver `useProcesarInformacion` para el
+ * pipeline de extracción/validación/clasificación en sí, que ya no mueve
+ * el estado). Invalida tanto el detalle del despacho como la lista: el
+ * Explorer agrupa por estado, este despacho se mueve de grupo.
  */
 export function useEnviarAClasificacion(idDespacho: string) {
   const queryClient = useQueryClient();
@@ -21,10 +19,10 @@ export function useEnviarAClasificacion(idDespacho: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.despachos.detail(idDespacho) });
       queryClient.invalidateQueries({ queryKey: queryKeys.despachos.list() });
-      toast.success("Procesamiento completo. Revisa la pestaña Clasificación.");
+      toast.success("Despacho enviado a Clasificación.");
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "No se pudo procesar el despacho.");
+      toast.error(error instanceof Error ? error.message : "No se pudo enviar a clasificación.");
     },
   });
 }

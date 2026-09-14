@@ -7,9 +7,11 @@ import type { BadgeProps } from "@/components/ui/badge";
 export const ESTADO_INFO: Record<EstadoDespacho, { label: string; variant: NonNullable<BadgeProps["variant"]> }> = {
   REVISION_DOC: { label: "Revisión Doc.", variant: "indigo" },
   CLASIFICACION: { label: "Clasificación", variant: "amber" },
-  REVISADO: { label: "Revisados", variant: "verde" },
-  OBSERVADO: { label: "Observados", variant: "rojo" },
+  // "Cerrado", sin importar si el liquidador aceptó u observó la
+  // propuesta -- ese detalle vive en decision.tipo_accion, no en el
+  // estado del despacho (ver ClasificacionTab).
+  FINALIZADO: { label: "Finalizado", variant: "verde" },
 };
 
-/** Orden de los grupos del Explorer -- mismo orden que la version Streamlit. */
-export const ORDEN_ESTADOS: EstadoDespacho[] = ["REVISION_DOC", "CLASIFICACION", "REVISADO", "OBSERVADO"];
+/** Orden de los grupos del Explorer. */
+export const ORDEN_ESTADOS: EstadoDespacho[] = ["REVISION_DOC", "CLASIFICACION", "FINALIZADO"];

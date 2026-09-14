@@ -12,6 +12,7 @@ import type {
   TipoDocumento,
 } from "@/lib/types";
 import { useProfile } from "@/hooks/useProfile";
+import { useProcesarInformacion } from "@/hooks/useProcesarInformacion";
 import { useEnviarAClasificacion } from "@/hooks/useEnviarAClasificacion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -26,9 +27,13 @@ export interface RevisionTabProps {
   estadoDespacho: EstadoDespacho;
   documentos: DocumentoExtraidoOut[];
   validaciones: ResultadoValidacionOut[];
-  /** Llamar tras un "Procesar información" exitoso (POST
-   * enviar-a-clasificacion) -- el padre invalida la query de detalle y
-   * cambia automaticamente a la pestana de Clasificacion. */
+  /** true si ya existe una propuesta de clasificacion en la cache del
+   * backend (detalle.clasificacion !== null) -- habilita el botón "Enviar
+   * a Clasificación", que de otro modo no tiene nada que enviar. */
+  clasificacionLista: boolean;
+  /** Llamar tras un "Procesar información" o "Enviar a Clasificación"
+   * exitosos -- el padre invalida la query de detalle y cambia
+   * automaticamente a la pestana de Clasificacion. */
   onProcesado: () => void;
 }
 
@@ -58,8 +63,16 @@ const FILTRO_ACTIVO_CLASES: Record<Severidad, string> = {
  * frontend/dashboard.py (tab_revision, version Streamlit) para el
  * comportamiento original que esta pantalla reemplaza.
  */
-export function RevisionTab({ idDespacho, estadoDespacho, documentos, validaciones, onProcesado }: RevisionTabProps) {
+export function RevisionTab({
+  idDespacho,
+  estadoDespacho,
+  documentos,
+  validaciones,
+  clasificacionLista,
+  onProcesado,
+}: RevisionTabProps) {
   const { data: perfil, isLoading: perfilCargando } = useProfile();
+  const procesar = useProcesarInformacion(idDespacho);
   const enviar = useEnviarAClasificacion(idDespacho);
   // Filtro de severidad de los hallazgos -- arranca con las 3 activas (sin
   // filtrar). Desmarcar una severidad reduce la lista, lo que achica esta
@@ -71,6 +84,7 @@ export function RevisionTab({ idDespacho, estadoDespacho, documentos, validacion
   const minimosOk = DOCUMENTOS_MINIMOS.every((tipo) => documentos.some((d) => d.tipo_documento === tipo));
   const puedeProcesar = puedeEnviarAClasificacion(perfil?.rol);
   const esEstadoRevision = estadoDespacho === "REVISION_DOC";
+  const ocupado = procesar.isPending || enviar.isPending;
   const validacionesFiltradas = validaciones
     .filter((v) => filtroSeveridad.includes(v.severidad))
     .sort((a, b) => ORDEN_SEVERIDAD[a.severidad] - ORDEN_SEVERIDAD[b.severidad]);
@@ -82,6 +96,15 @@ export function RevisionTab({ idDespacho, estadoDespacho, documentos, validacion
   }
 
   async function manejarProcesar() {
+    try {
+      await procesar.mutateAsync();
+      onProcesado();
+    } catch {
+      // El hook ya notifico el error via toast; no hay nada mas que hacer aqui.
+    }
+  }
+
+  async function manejarEnviar() {
     try {
       await enviar.mutateAsync();
       onProcesado();
@@ -108,14 +131,14 @@ export function RevisionTab({ idDespacho, estadoDespacho, documentos, validacion
               idDespacho={idDespacho}
               tipo={tipo}
               documento={documentos.find((d) => d.tipo_documento === tipo)}
-              disabled={enviar.isPending}
+              disabled={ocupado}
             />
           ))}
         </div>
 
         {!esEstadoRevision ? (
           <p className="text-sm text-texto-secundario">
-            Este despacho ya fue procesado (estado actual: {estadoDespacho}).
+            Este despacho ya fue enviado a clasificación (estado actual: {estadoDespacho}).
           </p>
         ) : perfilCargando ? (
           <Skeleton className="h-10 w-full" />
@@ -126,13 +149,28 @@ export function RevisionTab({ idDespacho, estadoDespacho, documentos, validacion
             <Button
               type="button"
               onClick={manejarProcesar}
-              disabled={!minimosOk || enviar.isPending}
+              disabled={!minimosOk || ocupado}
+              className="w-full"
+            >
+              {procesar.isPending && <Loader2 className="animate-spin" />}
+              {procesar.isPending ? "Extrayendo datos, validando y clasificando..." : "Procesar información"}
+            </Button>
+            {!minimosOk && <p className="text-xs text-texto-secundario">Carga al menos Factura y BL primero.</p>}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={manejarEnviar}
+              disabled={!clasificacionLista || ocupado}
               className="w-full"
             >
               {enviar.isPending && <Loader2 className="animate-spin" />}
-              {enviar.isPending ? "Extrayendo datos, validando y clasificando..." : "Procesar información"}
+              {enviar.isPending ? "Enviando..." : "Enviar a Clasificación"}
             </Button>
-            {!minimosOk && <p className="text-xs text-texto-secundario">Carga al menos Factura y BL primero.</p>}
+            {minimosOk && !clasificacionLista && (
+              <p className="text-xs text-texto-secundario">
+                Presiona &quot;Procesar información&quot; primero para generar la propuesta de clasificación.
+              </p>
+            )}
           </div>
         )}
       </section>

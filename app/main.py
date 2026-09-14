@@ -2,21 +2,30 @@
 Backend FastAPI de AduANITA: expone el pipeline completo de revision
 documental aduanera y clasificacion arancelaria asistida.
 
-Maquina de estados del despacho (4 estados, dos roles distintos):
-  REVISION_DOC -> CLASIFICACION -> REVISADO | OBSERVADO
+Maquina de estados del despacho (3 estados, dos roles distintos):
+  REVISION_DOC -> CLASIFICACION -> FINALIZADO
 
   1. POST /despachos                                       -> crear despacho (estado=REVISION_DOC)
   2. POST /despachos/{id}/documentos  (x2 minimo: FACTURA+BL) -> subir cada PDF (RAPIDO: solo
                                                                  guarda el archivo, no llama a Gemini)
   3. DELETE /despachos/{id}/documentos/{tipo}               -> quitar un documento ya cargado (opcional;
                                                                  subir uno nuevo del mismo tipo tambien lo reemplaza)
-  4. POST /despachos/{id}/enviar-a-clasificacion            -> ESPECIALISTA, boton "Procesar informacion":
+  4. POST /despachos/{id}/procesar-informacion              -> ESPECIALISTA, boton "Procesar informacion":
                                                                  extrae (Gemini) los documentos pendientes +
                                                                  valida + clasifica (RAG+Gemini) + genera
-                                                                 borrador -> estado=CLASIFICACION, desatendido
-  5. (el liquidador revisa la propuesta en el dashboard)
-  6. POST /despachos/{id}/decision                         -> LIQUIDADOR: acepta (REVISADO) u observa
-                                                                 (OBSERVADO, con motivo) -> feedback al RAG
+                                                                 borrador. NO cambia el estado (se queda en
+                                                                 REVISION_DOC): se puede reprocesar cuantas
+                                                                 veces haga falta antes de enviar a clasificar.
+  5. POST /despachos/{id}/enviar-a-clasificacion            -> ESPECIALISTA, boton propio "Enviar a
+                                                                 Clasificacion": exige FACTURA+BL ya procesados
+                                                                 -> estado=CLASIFICACION. Es la unica accion
+                                                                 que mueve el despacho fuera de REVISION_DOC.
+  6. (el liquidador revisa la propuesta en el dashboard)
+  7. POST /despachos/{id}/decision                         -> LIQUIDADOR: acepta (REVISADO) u observa
+                                                                 (OBSERVADO, con motivo) -> feedback al RAG,
+                                                                 estado=FINALIZADO en ambos casos (cual de las
+                                                                 dos ocurrio queda en
+                                                                 historial_clasificaciones.tipo_accion).
 
 Los endpoints granulares /validar, /clasificar y /generar-borrador siguen
 disponibles por separado (util para depurar via /docs), pero no mueven el
@@ -50,6 +59,7 @@ from services.email_draft_service import (
 )
 from services.export_service import generar_excel_despacho
 from services.gemini_classifier import PropuestaClasificacion, clasificar
+from services.preliquidacion_service import calcular_preliquidacion
 from services.pdf_processor import (
     TIPO_A_SCHEMA,
     EXTENSION_POR_MIME,
@@ -201,11 +211,15 @@ class DespachoDetalleOut(BaseModel):
     validaciones: list[ResultadoValidacionOut]
     clasificacion: PropuestaClasificacionOut | None
     borrador: BorradorCorreoOut | None
-    # Decision ya persistida del liquidador (REVISADO/OBSERVADO). Es la
-    # fuente de verdad para despachos ya cerrados: `clasificacion` es una
-    # cache en memoria del proceso que se limpia justo al decidir (ver
-    # registrar_decision), asi que no sirve para mostrar el resultado final.
+    # Decision ya persistida del liquidador (aceptada u observada, ver
+    # tipo_accion). Es la fuente de verdad para despachos ya FINALIZADOs:
+    # `clasificacion` es una cache en memoria del proceso que se limpia
+    # justo al decidir (ver registrar_decision), asi que no sirve para
+    # mostrar el resultado final.
     decision: HistorialClasificacionOut | None = None
+    # Snapshot ya calculado de la pre-liquidacion (null si aun no se
+    # presiono "Calcular" en esa pestana).
+    preliquidacion: PreliquidacionOut | None = None
 
 
 class ActualizarBorradorRequest(BaseModel):
@@ -267,6 +281,56 @@ class ReglaValidacionOut(ReglaValidacionUpsert):
     actualizado_en: str
 
 
+class CargoEspecialArancelUpsert(BaseModel):
+    subpartida: str
+    antidumping_monto: float = 0
+    derecho_especifico_monto: float = 0
+    moneda: str = "USD"
+    nota: str | None = None
+
+
+class CargoEspecialArancelOut(CargoEspecialArancelUpsert):
+    id: str
+    creado_en: str
+    actualizado_en: str
+
+
+class PreliquidacionOut(BaseModel):
+    id: str
+    id_despacho: str
+    subpartida: str
+    valor_cif: float
+    moneda: str
+    ad_valorem_tasa: float
+    ad_valorem_monto: float
+    base_igv_ipm: float
+    igv_monto: float
+    ipm_monto: float
+    antidumping_monto: float
+    derecho_especifico_monto: float
+    total_tributos: float
+    actualizado_en: str
+
+
+class CalcularPreliquidacionRequest(BaseModel):
+    valor_cif: float
+    moneda: str = "USD"
+    # Si vienen null, se usa el default de cargos_especiales_arancel para
+    # la subpartida vigente (o 0 si tampoco hay default cargado).
+    antidumping_monto: float | None = None
+    derecho_especifico_monto: float | None = None
+
+
+class PreliquidacionDetalleOut(BaseModel):
+    """Respuesta de GET /preliquidacion: la fila ya calculada (si existe),
+    mas todo lo que el frontend necesita para precargar el formulario sin
+    otra ida y vuelta."""
+
+    preliquidacion: PreliquidacionOut | None
+    subpartida_vigente: str | None
+    cargo_especial_default: CargoEspecialArancelOut | None
+
+
 # ---------------------------------------------------------------------
 # Helpers internos
 # ---------------------------------------------------------------------
@@ -283,6 +347,40 @@ def _obtener_regla_o_404(admin: Client, id_regla: str) -> dict:
     if not respuesta.data:
         raise HTTPException(status_code=404, detail=f"No existe una regla de validacion con id {id_regla}.")
     return respuesta.data[0]
+
+
+def _obtener_cargo_especial_o_404(admin: Client, id_cargo: str) -> dict:
+    respuesta = admin.table("cargos_especiales_arancel").select("*").eq("id", id_cargo).execute()
+    if not respuesta.data:
+        raise HTTPException(status_code=404, detail=f"No existe un cargo especial con id {id_cargo}.")
+    return respuesta.data[0]
+
+
+def _obtener_subpartida_vigente(admin: Client, id_despacho: str) -> str | None:
+    """La subpartida a usar para pre-liquidacion: la decision ya persistida
+    del liquidador si existe (fuente de verdad, sin importar el estado
+    actual del despacho), o si no la propuesta de la IA en cache mientras
+    el despacho todavia no se decide."""
+    decision_respuesta = (
+        admin.table("historial_clasificaciones")
+        .select("subpartida_final_humano")
+        .eq("id_despacho", id_despacho)
+        .order("creado_en", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if decision_respuesta.data:
+        return decision_respuesta.data[0]["subpartida_final_humano"]
+
+    clasificacion = _cache_clasificaciones.get(id_despacho)
+    return clasificacion.subpartida_sugerida if clasificacion else None
+
+
+def _obtener_cargo_especial_por_subpartida(admin: Client, subpartida: str) -> dict | None:
+    respuesta = (
+        admin.table("cargos_especiales_arancel").select("*").eq("subpartida", subpartida).execute()
+    )
+    return respuesta.data[0] if respuesta.data else None
 
 
 _PARAMETROS_POR_TIPO: dict[str, type[BaseModel]] = {
@@ -459,7 +557,8 @@ def _ejecutar_clasificacion(admin: Client, id_despacho: str) -> PropuestaClasifi
     _cache_clasificaciones[id_despacho] = propuesta
     _cache_info_suficiente[id_despacho] = info_suficiente
     # El cambio de estado a CLASIFICACION lo hace el endpoint
-    # enviar-a-clasificacion, que es quien orquesta este paso.
+    # enviar-a-clasificacion (una accion aparte, ver mas abajo) -- este
+    # paso (llamado por procesar-informacion) nunca toca el estado.
 
     return propuesta
 
@@ -551,6 +650,11 @@ def _armar_detalle_despacho(admin: Client, id_despacho: str) -> dict:
     )
     decision = decision_respuesta.data[0] if decision_respuesta.data else None
 
+    preliquidacion_respuesta = (
+        admin.table("preliquidaciones").select("*").eq("id_despacho", id_despacho).execute()
+    )
+    preliquidacion = preliquidacion_respuesta.data[0] if preliquidacion_respuesta.data else None
+
     return {
         "despacho": despacho,
         "documentos": documentos,
@@ -558,6 +662,7 @@ def _armar_detalle_despacho(admin: Client, id_despacho: str) -> dict:
         "clasificacion": clasificacion,
         "borrador": borrador,
         "decision": decision,
+        "preliquidacion": preliquidacion,
     }
 
 
@@ -582,6 +687,94 @@ def exportar_despacho_excel(id_despacho: str, usuario: UsuarioAutenticado = Depe
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'},
     )
+
+
+@app.get("/despachos/{id_despacho}/preliquidacion", response_model=PreliquidacionDetalleOut)
+def obtener_preliquidacion(
+    id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_user)
+) -> dict:
+    """Trae la pre-liquidacion ya calculada (si existe) mas la subpartida
+    vigente y el default de cargos_especiales_arancel para esa subpartida,
+    todo junto para que el frontend precargue el formulario de una sola
+    llamada."""
+    admin = get_supabase_admin_client()
+    _obtener_despacho_o_404(admin, id_despacho)
+
+    preliquidacion_respuesta = (
+        admin.table("preliquidaciones").select("*").eq("id_despacho", id_despacho).execute()
+    )
+    preliquidacion = preliquidacion_respuesta.data[0] if preliquidacion_respuesta.data else None
+
+    subpartida_vigente = _obtener_subpartida_vigente(admin, id_despacho)
+    cargo_default = (
+        _obtener_cargo_especial_por_subpartida(admin, subpartida_vigente) if subpartida_vigente else None
+    )
+
+    return {
+        "preliquidacion": preliquidacion,
+        "subpartida_vigente": subpartida_vigente,
+        "cargo_especial_default": cargo_default,
+    }
+
+
+@app.post("/despachos/{id_despacho}/preliquidacion/calcular", response_model=PreliquidacionOut)
+def calcular_preliquidacion_despacho(
+    id_despacho: str,
+    datos: CalcularPreliquidacionRequest,
+    usuario: UsuarioAutenticado = Depends(get_current_user),
+) -> dict:
+    """Calcula (o recalcula) los tributos del despacho y sobreescribe el
+    snapshot en `preliquidaciones` (upsert por id_despacho). El especialista
+    o el liquidador pueden hacerlo -- no esta atado a una unica transicion
+    de estado, se puede recalcular cuantas veces haga falta."""
+    _requiere_rol(usuario, {"ESPECIALISTA", "LIQUIDADOR"})
+
+    admin = get_supabase_admin_client()
+    _obtener_despacho_o_404(admin, id_despacho)
+
+    subpartida = _obtener_subpartida_vigente(admin, id_despacho)
+    if not subpartida:
+        raise HTTPException(
+            status_code=400,
+            detail="Aún no hay una subpartida determinada; completa la Clasificación primero.",
+        )
+
+    partida_respuesta = (
+        admin.table("partidas_arancelarias").select("ad_valorem").eq("codigo", subpartida).execute()
+    )
+    if not partida_respuesta.data:
+        raise HTTPException(
+            status_code=400,
+            detail=f"La subpartida {subpartida} no existe en el arancel nacional cargado.",
+        )
+    ad_valorem_tasa = partida_respuesta.data[0]["ad_valorem"] or 0
+
+    antidumping_monto = datos.antidumping_monto
+    derecho_especifico_monto = datos.derecho_especifico_monto
+    if antidumping_monto is None or derecho_especifico_monto is None:
+        cargo_default = _obtener_cargo_especial_por_subpartida(admin, subpartida)
+        if antidumping_monto is None:
+            antidumping_monto = cargo_default["antidumping_monto"] if cargo_default else 0
+        if derecho_especifico_monto is None:
+            derecho_especifico_monto = cargo_default["derecho_especifico_monto"] if cargo_default else 0
+
+    resultado = calcular_preliquidacion(
+        valor_cif=datos.valor_cif,
+        ad_valorem_tasa=ad_valorem_tasa,
+        antidumping_monto=antidumping_monto,
+        derecho_especifico_monto=derecho_especifico_monto,
+    )
+
+    fila = {
+        "id_despacho": id_despacho,
+        "subpartida": subpartida,
+        "moneda": datos.moneda,
+        "actualizado_por": usuario.id,
+        "actualizado_en": _ahora_iso(),
+        **resultado.model_dump(),
+    }
+    respuesta = admin.table("preliquidaciones").upsert(fila, on_conflict="id_despacho").execute()
+    return respuesta.data[0]
 
 
 @app.post("/despachos/{id_despacho}/documentos", response_model=DocumentoExtraidoOut)
@@ -747,7 +940,8 @@ def registrar_decision(
 
     # El feedback al RAG usa internamente el vocabulario APROBADO/EDITADO
     # (peso_prioridad de historial_clasificaciones), independiente del
-    # nombre del estado del despacho (REVISADO/OBSERVADO).
+    # estado del despacho (que ahora es siempre FINALIZADO al decidir,
+    # sin importar accion -- ver mas abajo).
     tipo_accion_rag = "APROBADO" if datos.accion == "REVISADO" else "EDITADO"
 
     cliente_usuario = get_supabase_user_client(usuario.access_token)
@@ -763,41 +957,84 @@ def registrar_decision(
         motivo_modificacion=datos.motivo_modificacion,
     )
 
-    _actualizar_estado_despacho(admin, id_despacho, datos.accion)  # "REVISADO" u "OBSERVADO"
+    # El despacho pasa a FINALIZADO sin importar si accion fue REVISADO u
+    # OBSERVADO -- esa distincion queda registrada en tipo_accion_rag
+    # (historial_clasificaciones.tipo_accion), no en el estado del despacho.
+    _actualizar_estado_despacho(admin, id_despacho, "FINALIZADO")
     _cache_clasificaciones.pop(id_despacho, None)
     _cache_info_suficiente.pop(id_despacho, None)
 
     return fila_creada
 
 
-@app.post("/despachos/{id_despacho}/enviar-a-clasificacion", response_model=PipelineResultOut)
-def enviar_a_clasificacion(
+@app.post("/despachos/{id_despacho}/procesar-informacion", response_model=PipelineResultOut)
+def procesar_informacion(
     id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_user)
 ) -> dict:
     """Accion del especialista ("Procesar informacion"): extrae con Gemini
-    los documentos pendientes -> valida -> clasifica -> genera-borrador, y
-    mueve el despacho a estado CLASIFICACION, listo para que el liquidador
-    lo revise. Es el unico punto donde se llama a Gemini para extraccion:
-    subir_documento solo guarda el PDF (rapido, sin extraer)."""
+    los documentos pendientes -> valida -> clasifica -> genera-borrador. NO
+    cambia el estado del despacho (se queda en REVISION_DOC) -- se puede
+    presionar cuantas veces haga falta (p.ej. tras cargar un documento
+    nuevo) antes de enviarlo a clasificacion con el boton propio para eso
+    (ver `enviar_a_clasificacion` mas abajo). Es el unico punto donde se
+    llama a Gemini para extraccion: subir_documento solo guarda el archivo
+    (rapido, sin extraer)."""
     _requiere_rol(usuario, {"ESPECIALISTA"})
 
     admin = get_supabase_admin_client()
-    _obtener_despacho_o_404(admin, id_despacho)
+    despacho = _obtener_despacho_o_404(admin, id_despacho)
 
     _ejecutar_extraccion_pendiente(admin, id_despacho)
     validaciones = _ejecutar_validacion(admin, id_despacho)
     clasificacion = _ejecutar_clasificacion(admin, id_despacho)
     borrador = _ejecutar_generacion_borrador(admin, id_despacho)
 
-    _actualizar_estado_despacho(admin, id_despacho, "CLASIFICACION")
-    despacho_actualizado = _obtener_despacho_o_404(admin, id_despacho)
-
     return {
         "validaciones": [v.model_dump() for v in validaciones],
         "clasificacion": clasificacion.model_dump(),
         "borrador": borrador,
-        "estado_final": despacho_actualizado["estado"],
+        "estado_final": despacho["estado"],
     }
+
+
+@app.post("/despachos/{id_despacho}/enviar-a-clasificacion", response_model=DespachoOut)
+def enviar_a_clasificacion(
+    id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_user)
+) -> dict:
+    """Accion del especialista, boton propio "Enviar a Clasificacion": es
+    la UNICA transicion de REVISION_DOC -> CLASIFICACION. A diferencia de
+    `procesar_informacion`, esta no llama a Gemini ni recalcula nada -- solo
+    exige que FACTURA y BL ya esten procesados (mismo criterio que
+    DOCUMENTOS_MINIMOS en el frontend) y mueve el estado, dejando el
+    despacho listo para que el liquidador lo revise."""
+    _requiere_rol(usuario, {"ESPECIALISTA"})
+
+    admin = get_supabase_admin_client()
+    despacho = _obtener_despacho_o_404(admin, id_despacho)
+
+    if despacho["estado"] != "REVISION_DOC":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Solo se puede enviar a clasificacion un despacho en estado REVISION_DOC "
+                f"(estado actual: {despacho['estado']})."
+            ),
+        )
+
+    filas = _obtener_documentos_extraidos(admin, id_despacho)
+    procesados = {f["tipo_documento"] for f in filas if f.get("procesado")}
+    faltantes = {"FACTURA", "BL"} - procesados
+    if faltantes:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Faltan procesar: {', '.join(sorted(faltantes))}. "
+                f"Presiona 'Procesar información' antes de enviar a clasificación."
+            ),
+        )
+
+    _actualizar_estado_despacho(admin, id_despacho, "CLASIFICACION")
+    return _obtener_despacho_o_404(admin, id_despacho)
 
 
 # ---------------------------------------------------------------------
@@ -858,4 +1095,81 @@ def eliminar_regla_validacion(
     admin = get_supabase_admin_client()
     _obtener_regla_o_404(admin, id_regla)
     admin.table("reglas_validacion").delete().eq("id", id_regla).execute()
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------
+# Administracion (solo ADMIN): CRUD de cargos especiales del arancel
+# (antidumping / derecho especifico por subpartida -- ver Pre-liquidacion)
+# ---------------------------------------------------------------------
+
+def _validar_cargo_especial_o_400(admin: Client, datos: CargoEspecialArancelUpsert) -> None:
+    """La subpartida debe existir en partidas_arancelarias -- evita cargar
+    tasas contra codigos inexistentes/mal tipeados."""
+    respuesta = (
+        admin.table("partidas_arancelarias").select("codigo").eq("codigo", datos.subpartida).execute()
+    )
+    if not respuesta.data:
+        raise HTTPException(
+            status_code=400,
+            detail=f"La subpartida '{datos.subpartida}' no existe en el arancel nacional cargado.",
+        )
+
+
+@app.get("/admin/cargos-especiales-arancel", response_model=list[CargoEspecialArancelOut])
+def listar_cargos_especiales(usuario: UsuarioAutenticado = Depends(get_current_user)) -> list[dict]:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    return admin.table("cargos_especiales_arancel").select("*").order("subpartida").execute().data or []
+
+
+@app.post("/admin/cargos-especiales-arancel", response_model=CargoEspecialArancelOut)
+def crear_cargo_especial(
+    datos: CargoEspecialArancelUpsert, usuario: UsuarioAutenticado = Depends(get_current_user)
+) -> dict:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    _validar_cargo_especial_o_400(admin, datos)
+    fila = datos.model_dump()
+    fila["creado_por"] = usuario.id
+    try:
+        respuesta = admin.table("cargos_especiales_arancel").insert(fila).execute()
+    except Exception as error:
+        if "duplicate key" in str(error) or "23505" in str(error):
+            raise HTTPException(
+                status_code=400, detail=f"Ya existe un cargo especial para la subpartida '{datos.subpartida}'."
+            ) from error
+        raise
+    return respuesta.data[0]
+
+
+@app.put("/admin/cargos-especiales-arancel/{id_cargo}", response_model=CargoEspecialArancelOut)
+def actualizar_cargo_especial(
+    id_cargo: str, datos: CargoEspecialArancelUpsert, usuario: UsuarioAutenticado = Depends(get_current_user)
+) -> dict:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    _obtener_cargo_especial_o_404(admin, id_cargo)
+    _validar_cargo_especial_o_400(admin, datos)
+    fila = datos.model_dump()
+    fila["actualizado_en"] = _ahora_iso()
+    try:
+        respuesta = admin.table("cargos_especiales_arancel").update(fila).eq("id", id_cargo).execute()
+    except Exception as error:
+        if "duplicate key" in str(error) or "23505" in str(error):
+            raise HTTPException(
+                status_code=400, detail=f"Ya existe un cargo especial para la subpartida '{datos.subpartida}'."
+            ) from error
+        raise
+    return respuesta.data[0]
+
+
+@app.delete("/admin/cargos-especiales-arancel/{id_cargo}")
+def eliminar_cargo_especial(
+    id_cargo: str, usuario: UsuarioAutenticado = Depends(get_current_user)
+) -> dict:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    _obtener_cargo_especial_o_404(admin, id_cargo)
+    admin.table("cargos_especiales_arancel").delete().eq("id", id_cargo).execute()
     return {"status": "ok"}
