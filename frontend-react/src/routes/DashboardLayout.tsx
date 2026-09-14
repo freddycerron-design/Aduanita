@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Outlet, useMatch } from "react-router-dom";
 
-import logo from "@/assets/logo_aduanita.webp";
+import logo from "@/assets/logo_aduafy.webp";
 import { AccountPanel } from "@/components/layout/AccountPanel";
 import { ExplorerPanel } from "@/components/layout/ExplorerPanel";
 import type { PanelLateral } from "@/components/layout/IconRail";
@@ -39,7 +39,7 @@ export function DashboardLayout() {
   return (
     <div className="flex h-dvh bg-background text-texto">
       <div className="flex w-14 shrink-0 flex-col items-center border-r border-border bg-surface">
-        <img src={logo} alt="AduANITA" className="mt-4 w-10" />
+        <img src={logo} alt="Aduafy" className="mt-4 w-10" />
         <IconRail panelActivo={panelActivo} onCambiarPanel={alternarPanel} rol={perfil?.rol} />
       </div>
 

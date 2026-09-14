@@ -5,7 +5,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { z } from "zod";
 
-import logo from "@/assets/logo_aduanita.webp";
+import logo from "@/assets/logo_aduafy.webp";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -64,7 +64,7 @@ export function LoginPage() {
   return (
     <div className="flex h-dvh items-center justify-center bg-background px-4">
       <div className="mx-auto flex w-full max-w-sm flex-col items-center gap-6">
-        <img src={logo} alt="AduANITA" className="w-72" />
+        <img src={logo} alt="Aduafy" className="w-72" />
 
         <Card className="w-full">
           <CardContent className="flex flex-col gap-4 p-6">

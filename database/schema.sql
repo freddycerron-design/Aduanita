@@ -1,5 +1,5 @@
 -- =====================================================================
--- AduANITA MVP - Schema de base de datos (Supabase / PostgreSQL)
+-- Aduafy MVP - Schema de base de datos (Supabase / PostgreSQL)
 -- =====================================================================
 -- Ejecutar completo en el SQL Editor de Supabase, sobre un proyecto nuevo.
 -- Requiere que Supabase Auth ya este habilitado (viene activo por defecto).

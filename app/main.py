@@ -1,5 +1,5 @@
 """
-Backend FastAPI de AduANITA: expone el pipeline completo de revision
+Backend FastAPI de Aduafy: expone el pipeline completo de revision
 documental aduanera y clasificacion arancelaria asistida.
 
 Maquina de estados del despacho (3 estados, dos roles distintos):
@@ -87,7 +87,7 @@ from services.validation_engine import (
 settings = get_settings()
 
 app = FastAPI(
-    title="AduANITA API",
+    title="Aduafy API",
     description="Automatizacion de revision documental aduanera y clasificacion arancelaria asistida.",
     version="0.1.0",
 )
