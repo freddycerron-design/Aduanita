@@ -37,7 +37,10 @@
   --color-border: var(--color-surface-border);
   --color-input: var(--color-surface-border);
   --color-ring: var(--color-coral);
-  --color-primary: var(--color-coral);
+  /* Version menos intensa (mas desaturada) del coral, solo para el fondo
+     de los botones primarios -- el resto de los usos de coral (badges,
+     resaltados, foco) se quedan con el tono original mas vivo. */
+  --color-primary: #c86b4a;
   --color-primary-foreground: #ffffff;
   --color-secondary: var(--color-indigo);
   --color-secondary-foreground: var(--color-texto);
