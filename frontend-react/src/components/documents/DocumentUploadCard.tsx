@@ -62,9 +62,9 @@ export function DocumentUploadCard({ idDespacho, tipo, documento, disabled }: Do
         : "Elegir PDF o foto";
 
   return (
-    <Card className={cn(cargado && "border-verde/40 bg-verde/10")}>
+    <Card className={cn(cargado ? "border-verde/40 bg-verde/10" : "bg-surface-border/30")}>
       <CardHeader className="flex-row items-center justify-between gap-2">
-        <CardTitle className="flex items-center gap-2">
+        <CardTitle className="flex items-center gap-2 font-normal">
           <Icono className={cn("size-4 shrink-0", colorIcono)} aria-hidden="true" />
           {tipo}
         </CardTitle>
