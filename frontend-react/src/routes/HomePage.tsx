@@ -1,7 +1,10 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  AlertTriangle,
+  CheckCircle2,
   FileCheck2,
   FileSignature,
+  FileStack,
   PackageCheck,
   Receipt,
   Route,
@@ -10,9 +13,11 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
+import { useMetricas } from "@/hooks/useMetricas";
 import { useProfile } from "@/hooks/useProfile";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface Modulo {
   titulo: string;
@@ -106,6 +111,8 @@ export function HomePage() {
           <p className="mt-1 text-sm text-texto-secundario">Elige un módulo para comenzar.</p>
         </div>
 
+        <FranjaMetricas />
+
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {MODULOS.map((modulo) => (
             <TarjetaModulo key={modulo.titulo} modulo={modulo} />
@@ -113,6 +120,86 @@ export function HomePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Números del equipo arriba de los módulos. Cada tarjeta navega al
+ * Explorador cuando tiene sentido mirar esos despachos. */
+function FranjaMetricas() {
+  const { data: metricas, isLoading, isError } = useMetricas();
+
+  if (isError) return null; // las métricas son secundarias: si fallan, el Home igual sirve
+
+  if (isLoading || !metricas) {
+    return (
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-20 w-full" />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <TarjetaMetrica
+        icono={FileStack}
+        etiqueta="En revisión"
+        valor={metricas.en_revision}
+        color="text-indigo"
+        fondo="bg-indigo/30"
+      />
+      <TarjetaMetrica
+        icono={Tags}
+        etiqueta="Esperando decisión"
+        valor={metricas.en_clasificacion}
+        color="text-amber"
+        fondo="bg-amber/15"
+      />
+      <TarjetaMetrica
+        icono={CheckCircle2}
+        etiqueta="Finalizados"
+        valor={metricas.finalizados}
+        color="text-verde"
+        fondo="bg-verde/15"
+      />
+      <TarjetaMetrica
+        icono={AlertTriangle}
+        etiqueta="Hallazgos críticos"
+        valor={metricas.hallazgos_altos_abiertos}
+        color="text-rojo"
+        fondo="bg-rojo/15"
+      />
+    </div>
+  );
+}
+
+function TarjetaMetrica({
+  icono: Icono,
+  etiqueta,
+  valor,
+  color,
+  fondo,
+}: {
+  icono: LucideIcon;
+  etiqueta: string;
+  valor: number;
+  color: string;
+  fondo: string;
+}) {
+  return (
+    <Link
+      to="/despachos"
+      className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:border-coral/40 hover:bg-surface-border/30"
+    >
+      <div className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg", fondo, color)}>
+        <Icono className="size-4" />
+      </div>
+      <div className="flex min-w-0 flex-col">
+        <span className="text-xl font-semibold tabular-nums text-texto">{valor}</span>
+        <span className="truncate text-xs text-texto-secundario">{etiqueta}</span>
+      </div>
+    </Link>
   );
 }
 

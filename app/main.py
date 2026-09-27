@@ -341,6 +341,15 @@ class PreliquidacionDetalleOut(BaseModel):
     cargo_especial_default: CargoEspecialArancelOut | None
 
 
+class MetricasOut(BaseModel):
+    """Agregados para la pantalla de inicio (ver GET /metricas)."""
+
+    en_revision: int
+    en_clasificacion: int
+    finalizados: int
+    hallazgos_altos_abiertos: int
+
+
 RolUsuario = Literal["GESTOR", "LIQUIDADOR", "ADMIN"]
 
 
@@ -633,6 +642,37 @@ def _ejecutar_generacion_borrador(admin: Client, id_despacho: str) -> dict:
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/metricas", response_model=MetricasOut)
+def obtener_metricas(usuario: UsuarioAutenticado = Depends(get_current_user)) -> dict:
+    """Numeros de la pantalla de inicio: cuantos despachos hay en cada
+    estado y cuantos hallazgos criticos siguen abiertos. Cualquier
+    autenticado puede verlos (son agregados del equipo, no datos de un
+    despacho puntual)."""
+    admin = get_supabase_admin_client()
+
+    def contar_despachos(estado: str) -> int:
+        respuesta = admin.table("despachos").select("id", count="exact").eq("estado", estado).execute()
+        return respuesta.count or 0
+
+    # Hallazgos de severidad ALTA que siguen vivos: el join embebido
+    # (`despachos!inner`) filtra por el estado del despacho padre, para no
+    # contar los de despachos ya cerrados.
+    hallazgos = (
+        admin.table("resultados_validacion")
+        .select("id, despachos!inner(estado)", count="exact")
+        .eq("severidad", "ALTA")
+        .neq("despachos.estado", "FINALIZADO")
+        .execute()
+    )
+
+    return {
+        "en_revision": contar_despachos("REVISION_DOC"),
+        "en_clasificacion": contar_despachos("CLASIFICACION"),
+        "finalizados": contar_despachos("FINALIZADO"),
+        "hallazgos_altos_abiertos": hallazgos.count or 0,
+    }
 
 
 @app.get("/arancel/buscar", response_model=list[SubpartidaCandidata])

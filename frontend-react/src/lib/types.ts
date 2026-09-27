@@ -262,6 +262,15 @@ export interface ReglaValidacionOut extends ReglaValidacionUpsert {
   actualizado_en: string;
 }
 
+// --- métricas de inicio ---------------------------------------------
+
+export interface MetricasOut {
+  en_revision: number;
+  en_clasificacion: number;
+  finalizados: number;
+  hallazgos_altos_abiertos: number;
+}
+
 // --- arancel nacional ---------------------------------------------
 
 export interface SubpartidaArancelaria {

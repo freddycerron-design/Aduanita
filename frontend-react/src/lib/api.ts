@@ -12,6 +12,7 @@ import type {
   DocumentoExtraidoOut,
   EstadoDespacho,
   HistorialClasificacionOut,
+  MetricasOut,
   PipelineResultOut,
   PreliquidacionDetalleOut,
   PreliquidacionOut,
@@ -294,6 +295,12 @@ export function actualizarUsuario(idUsuario: string, datos: UsuarioUpdate): Prom
 
 export function eliminarUsuario(idUsuario: string): Promise<{ status: string }> {
   return apiFetch<{ status: string }>(`/admin/usuarios/${idUsuario}`, { method: "DELETE" });
+}
+
+// --- métricas de inicio ---------------------------------------------------------
+
+export function obtenerMetricas(): Promise<MetricasOut> {
+  return apiFetch<MetricasOut>("/metricas");
 }
 
 // --- arancel nacional ---------------------------------------------------------
