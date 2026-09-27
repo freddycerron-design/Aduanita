@@ -262,6 +262,16 @@ export interface ReglaValidacionOut extends ReglaValidacionUpsert {
   actualizado_en: string;
 }
 
+// --- arancel nacional ---------------------------------------------
+
+export interface SubpartidaArancelaria {
+  codigo: string;
+  descripcion: string;
+  ad_valorem: number | null;
+  /** Relevancia del full-text search; 0 cuando la búsqueda fue por código. */
+  rank: number;
+}
+
 // --- usuarios y roles (admin) ---------------------------------------
 
 export interface UsuarioOut {

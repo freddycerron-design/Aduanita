@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { CircleUser, Files, Home, Settings } from "lucide-react";
+import { BookOpen, CircleUser, Files, Home, Settings } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 import { esAdmin } from "@/lib/roles";
@@ -34,6 +34,13 @@ const ITEM_HOME: ItemRuta = { kind: "route", path: "/", icono: Home, etiqueta: "
 
 const ITEMS_PANEL: ItemPanel[] = [{ kind: "panel", id: "archivos", icono: Files, etiqueta: "Explorador" }];
 
+const ITEM_ARANCEL: ItemRuta = {
+  kind: "route",
+  path: "/aranceles",
+  icono: BookOpen,
+  etiqueta: "Aranceles",
+};
+
 const ITEM_CUENTA: ItemPanel = { kind: "panel", id: "cuenta", icono: CircleUser, etiqueta: "Cuenta" };
 
 const ITEM_CONFIGURACION: ItemRuta = {
@@ -64,8 +71,8 @@ function clasesIcono(activo: boolean, expandido: boolean): string {
  */
 export function IconRail({ panelActivo, onCambiarPanel, rol, expandido, email }: IconRailProps) {
   const itemsSuperiores: Array<ItemPanel | ItemRuta> = esAdmin(rol)
-    ? [ITEM_HOME, ...ITEMS_PANEL, ITEM_CONFIGURACION]
-    : [ITEM_HOME, ...ITEMS_PANEL];
+    ? [ITEM_HOME, ...ITEMS_PANEL, ITEM_ARANCEL, ITEM_CONFIGURACION]
+    : [ITEM_HOME, ...ITEMS_PANEL, ITEM_ARANCEL];
 
   function renderizarItem(item: ItemPanel | ItemRuta) {
     if (item.kind === "panel") {

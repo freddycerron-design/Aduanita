@@ -55,7 +55,12 @@ from pydantic import BaseModel, Field, ValidationError
 from supabase import Client
 
 from app.config import get_settings, get_supabase_admin_client, get_supabase_user_client
-from services.arancel_service import buscar_subpartidas_candidatas
+from services.arancel_service import (
+    SubpartidaCandidata,
+    buscar_por_codigo,
+    buscar_subpartidas_candidatas,
+    es_consulta_de_codigo,
+)
 from services.email_draft_service import (
     DespachoInfo,
     actualizar_borrador_editado,
@@ -628,6 +633,36 @@ def _ejecutar_generacion_borrador(admin: Client, id_despacho: str) -> dict:
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/arancel/buscar", response_model=list[SubpartidaCandidata])
+def buscar_en_arancel(
+    q: str,
+    limite: int = 25,
+    usuario: UsuarioAutenticado = Depends(get_current_user),
+) -> list[SubpartidaCandidata]:
+    """Consulta libre del Arancel Nacional (tabla partidas_arancelarias, la
+    misma que ya alimenta al clasificador como contexto). Dos modos segun
+    lo que escriba el usuario, resueltos en services/arancel_service.py:
+
+    - Si `q` son solo digitos y puntos ("9011", "9011.10"), busca por
+      PREFIJO de codigo -- util cuando ya se sabe la partida y se quiere
+      ver sus aperturas.
+    - Si no, busca por TEXTO sobre la descripcion oficial (full-text con
+      semantica OR, la misma RPC que usa el clasificador).
+
+    Devuelve lista vacia si la consulta viene vacia, en vez de traer las
+    8000 partidas.
+    """
+    consulta = q.strip()
+    if not consulta:
+        return []
+
+    admin = get_supabase_admin_client()
+    limite = max(1, min(limite, 100))
+    if es_consulta_de_codigo(consulta):
+        return buscar_por_codigo(admin, consulta, limite)
+    return buscar_subpartidas_candidatas(admin, consulta, limite)
 
 
 @app.post("/despachos", response_model=DespachoOut)

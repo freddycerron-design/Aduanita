@@ -9,6 +9,7 @@ import { DashboardLayout } from "@/routes/DashboardLayout";
 import { DespachoPage } from "@/routes/DespachoPage";
 import { EmptyDespachoState } from "@/routes/EmptyDespachoState";
 import { HomePage } from "@/routes/HomePage";
+import { ArancelPage } from "@/routes/ArancelPage";
 import { AdminPage } from "@/routes/AdminPage";
 
 const queryClient = new QueryClient({
@@ -39,6 +40,7 @@ function AppRoutes() {
         <Route index element={<HomePage />} />
         <Route path="despachos" element={<EmptyDespachoState />} />
         <Route path="despachos/:id" element={<DespachoPage />} />
+        <Route path="aranceles" element={<ArancelPage />} />
         <Route path="admin" element={<AdminPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

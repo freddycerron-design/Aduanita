@@ -17,6 +17,7 @@ import type {
   PreliquidacionOut,
   ReglaValidacionOut,
   ReglaValidacionUpsert,
+  SubpartidaArancelaria,
   TipoDocumento,
   UsuarioCreate,
   UsuarioOut,
@@ -293,6 +294,15 @@ export function actualizarUsuario(idUsuario: string, datos: UsuarioUpdate): Prom
 
 export function eliminarUsuario(idUsuario: string): Promise<{ status: string }> {
   return apiFetch<{ status: string }>(`/admin/usuarios/${idUsuario}`, { method: "DELETE" });
+}
+
+// --- arancel nacional ---------------------------------------------------------
+
+/** Consulta libre del Arancel Nacional. El backend decide solo si `q` es
+ * un código (busca por prefijo) o texto (full-text sobre la descripción). */
+export function buscarEnArancel(q: string, limite = 25): Promise<SubpartidaArancelaria[]> {
+  const params = new URLSearchParams({ q, limite: String(limite) });
+  return apiFetch<SubpartidaArancelaria[]>(`/arancel/buscar?${params.toString()}`);
 }
 
 // --- exportar despacho ---------------------------------------------------------

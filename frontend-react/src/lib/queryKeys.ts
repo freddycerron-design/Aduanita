@@ -19,4 +19,7 @@ export const queryKeys = {
   usuarios: {
     list: () => ["usuarios"] as const,
   },
+  arancel: {
+    busqueda: (q: string) => ["arancel", q] as const,
+  },
 };
