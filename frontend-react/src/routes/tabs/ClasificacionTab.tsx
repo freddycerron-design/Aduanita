@@ -76,7 +76,7 @@ export function ClasificacionTab({
   if (estadoDespacho === "REVISION_DOC" && clasificacion === null) {
     return (
       <Aviso tono="info">
-        Este despacho aún no fue procesado. Carga los documentos y presiona "Procesar información" en la
+        Este despacho aún no fue procesado. Carga los documentos y presiona "Extracción y validación" en la
         pestaña Revisión para generar la propuesta de clasificación.
       </Aviso>
     );

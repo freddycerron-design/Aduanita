@@ -13,7 +13,7 @@ interface SubirDocumentoVariables {
 /**
  * Sube el PDF de un tipo de documento para un despacho. Solo guarda el
  * archivo -- no extrae datos todavia (`procesado: false` en la respuesta),
- * eso ocurre en bloque al presionar "Procesar información". Un archivo
+ * eso ocurre en bloque al presionar "Extracción y validación". Un archivo
  * nuevo del mismo tipo reemplaza al anterior automaticamente (el backend
  * hace upsert), asi que este mismo hook sirve tanto para la primera carga
  * como para un reemplazo.

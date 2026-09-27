@@ -14,7 +14,7 @@ Maquina de estados del despacho (3 estados, dos roles distintos):
                                                                  por el modelo. Valida contra el mismo schema
                                                                  Pydantic que la extraccion y rehace la
                                                                  validacion cruzada al instante (sin Gemini).
-  4. POST /despachos/{id}/procesar-informacion              -> GESTOR, boton "Procesar informacion":
+  4. POST /despachos/{id}/procesar-informacion              -> GESTOR, boton "Extraccion y validacion":
                                                                  extrae (Gemini) los documentos pendientes +
                                                                  valida + clasifica (RAG+Gemini) + genera
                                                                  borrador. NO cambia el estado (se queda en
@@ -737,7 +737,7 @@ def _ejecutar_extraccion_pendiente(admin: Client, id_despacho: str) -> None:
     """Extrae con Gemini el contenido_json de todos los documentos
     subidos pero aun no procesados de este despacho (procesado=False).
 
-    Es el primer paso de "Procesar informacion": si falla la extraccion
+    Es el primer paso de "Extraccion y validacion": si falla la extraccion
     de un documento REQUERIDO (FACTURA o BL), aborta con 422 y ninguno de
     los pasos siguientes (validar/clasificar) se ejecuta. Si falla un
     documento opcional (SEGURO/SWIFT_BANCARIO), se omite y se continua --
@@ -1345,7 +1345,7 @@ def subir_documento(
     """Sube el documento (PDF o imagen) a Storage y registra un marcador
     'pendiente de procesar' -- NO llama a Gemini aqui (por eso es rapida).
     La extraccion real se hace en bloque, para todos los documentos
-    pendientes del despacho a la vez, al presionar "Procesar informacion"
+    pendientes del despacho a la vez, al presionar "Extraccion y validacion"
     (ver enviar_a_clasificacion / _ejecutar_extraccion_pendiente). Si ya
     existia un documento de este tipo, subir uno nuevo lo reemplaza
     automaticamente (upsert); la decision de que estrategia de extraccion
@@ -1408,7 +1408,7 @@ def subir_documento(
     ).execute()
 
     # Subir un documento no mueve el estado del despacho: se queda en
-    # REVISION_DOC hasta que el especialista presione "Procesar informacion".
+    # REVISION_DOC hasta que el especialista presione "Extraccion y validacion".
     return respuesta.data[0]
 
 
@@ -1477,7 +1477,7 @@ def actualizar_contenido_documento(
     es Python puro + base de datos, sin costo de Gemini) para que las
     discrepancias reflejen el dato corregido. La clasificacion NO se
     rehace sola: esa si cuesta una llamada al modelo y sigue detras del
-    boton "Procesar informacion".
+    boton "Extraccion y validacion".
     """
     _requiere_rol(usuario, {"GESTOR"})
 
@@ -1503,7 +1503,7 @@ def actualizar_contenido_documento(
         raise HTTPException(
             status_code=400,
             detail=(
-                f"El {tipo_documento} todavia no se ha procesado. Presiona 'Procesar informacion' "
+                f"El {tipo_documento} todavia no se ha procesado. Presiona 'Extraccion y validacion' "
                 f"antes de corregir sus datos."
             ),
         )
@@ -1637,7 +1637,7 @@ def registrar_decision(
 def procesar_informacion(
     id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_staff)
 ) -> dict:
-    """Accion del especialista ("Procesar informacion"): extrae con Gemini
+    """Accion del especialista ("Extraccion y validacion"): extrae con Gemini
     los documentos pendientes -> valida -> clasifica -> genera-borrador. NO
     cambia el estado del despacho (se queda en REVISION_DOC) -- se puede
     presionar cuantas veces haga falta (p.ej. tras cargar un documento
@@ -1695,7 +1695,7 @@ def enviar_a_clasificacion(
             status_code=400,
             detail=(
                 f"Faltan procesar: {', '.join(sorted(faltantes))}. "
-                f"Presiona 'Procesar información' antes de enviar a clasificación."
+                f"Presiona 'Extraccion y validacion' antes de enviar a clasificacion."
             ),
         )
 

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { puedeEnviarAClasificacion } from "@/lib/roles";
@@ -31,14 +31,14 @@ export interface RevisionTabProps {
    * backend (detalle.clasificacion !== null) -- habilita el botón "Enviar
    * a Clasificación", que de otro modo no tiene nada que enviar. */
   clasificacionLista: boolean;
-  /** Llamar tras un "Procesar información" o "Enviar a Clasificación"
+  /** Llamar tras un "Extracción y validación" o "Enviar a Clasificación"
    * exitosos -- el padre invalida la query de detalle y cambia
    * automaticamente a la pestana de Clasificacion. */
   onProcesado: () => void;
 }
 
 /** Tipos que como minimo deben estar cargados (no hace falta que ya esten
- * `procesado`) para habilitar "Procesar información". Seguro y SWIFT son
+ * `procesado`) para habilitar "Extracción y validación". Seguro y SWIFT son
  * opcionales. */
 const DOCUMENTOS_MINIMOS: TipoDocumento[] = ["FACTURA", "BL"];
 
@@ -82,6 +82,11 @@ export function RevisionTab({
   const [filtroSeveridad, setFiltroSeveridad] = useState<Severidad[]>(TODAS_SEVERIDADES);
 
   const minimosOk = DOCUMENTOS_MINIMOS.every((tipo) => documentos.some((d) => d.tipo_documento === tipo));
+  // Independiente de que la extraccion se haya disparado recien ahora o
+  // vengas a revisar un despacho ya procesado -- el aviso tiene sentido
+  // en los dos casos, no solo en el instante en que termina "Extracción
+  // y validación".
+  const hayDatosExtraidos = documentos.some((d) => d.procesado);
   const puedeProcesar = puedeEnviarAClasificacion(perfil?.rol);
   const esEstadoRevision = estadoDespacho === "REVISION_DOC";
   const ocupado = procesar.isPending || enviar.isPending;
@@ -120,7 +125,7 @@ export function RevisionTab({
           <h2 className="text-sm font-semibold text-texto">Documentos</h2>
           <p className="text-xs text-texto-secundario">
             Cargar solo sube el archivo, PDF o foto (rápido, sin extraer datos todavía). Cuando termines, presiona
-            &quot;Procesar información&quot; para extraer, validar y clasificar todo de una vez.
+            &quot;Extracción y validación&quot; para extraer, validar y clasificar todo de una vez.
           </p>
         </div>
 
@@ -146,31 +151,38 @@ export function RevisionTab({
           <p className="text-sm text-texto-secundario">Solo un especialista puede procesar este despacho.</p>
         ) : (
           <div className="flex flex-col gap-2">
-            <Button
-              type="button"
-              onClick={manejarProcesar}
-              disabled={!minimosOk || ocupado}
-              className="w-full"
-            >
-              {procesar.isPending && <Loader2 className="animate-spin" />}
-              {procesar.isPending ? "Extrayendo datos, validando y clasificando..." : "Procesar información"}
-            </Button>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="button" onClick={manejarProcesar} disabled={!minimosOk || ocupado}>
+                {procesar.isPending && <Loader2 className="animate-spin" />}
+                {procesar.isPending ? "Extrayendo datos, validando y clasificando..." : "Extracción y validación"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={manejarEnviar}
+                disabled={!clasificacionLista || ocupado}
+              >
+                {enviar.isPending && <Loader2 className="animate-spin" />}
+                {enviar.isPending ? "Enviando..." : "Enviar a Clasificación"}
+              </Button>
+            </div>
             {!minimosOk && <p className="text-xs text-texto-secundario">Carga al menos Factura y BL primero.</p>}
-            <Button
-              type="button"
-              variant="outline"
-              onClick={manejarEnviar}
-              disabled={!clasificacionLista || ocupado}
-              className="w-full"
-            >
-              {enviar.isPending && <Loader2 className="animate-spin" />}
-              {enviar.isPending ? "Enviando..." : "Enviar a Clasificación"}
-            </Button>
             {minimosOk && !clasificacionLista && (
               <p className="text-xs text-texto-secundario">
-                Presiona &quot;Procesar información&quot; primero para generar la propuesta de clasificación.
+                Presiona &quot;Extracción y validación&quot; primero para generar la propuesta de clasificación.
               </p>
             )}
+          </div>
+        )}
+
+        {hayDatosExtraidos && (
+          <div className="flex items-start gap-2 rounded-lg border border-amber/40 bg-amber/10 p-3 text-xs text-amber">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <p>
+              Estos datos los extrajo una inteligencia artificial y puede haberse equivocado. Revísalos con
+              cuidado antes de usarlos en una declaración, en contabilidad o en cualquier otro trámite aduanero
+              -- Aduafy no se hace responsable por errores en los documentos que generes con esta información.
+            </p>
           </div>
         )}
       </section>
@@ -216,7 +228,7 @@ export function RevisionTab({
           </Card>
         ) : validaciones.length === 0 ? (
           <p className="text-sm text-texto-secundario">
-            Aún no se ha ejecutado la validación. Se genera al presionar &quot;Procesar información&quot;.
+            Aún no se ha ejecutado la validación. Se genera al presionar &quot;Extracción y validación&quot;.
           </p>
         ) : validacionesFiltradas.length === 0 ? (
           <p className="text-sm text-texto-secundario">No hay hallazgos con los filtros seleccionados.</p>

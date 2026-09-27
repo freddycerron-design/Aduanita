@@ -13,7 +13,7 @@ export interface DocumentUploadCardProps {
   idDespacho: string;
   tipo: TipoDocumento;
   documento: DocumentoExtraidoOut | undefined;
-  /** Deshabilita subir/eliminar (p.ej. mientras "Procesar información"
+  /** Deshabilita subir/eliminar (p.ej. mientras "Extracción y validación"
    * esta en curso, para no cambiar documentos a mitad del pipeline). */
   disabled?: boolean;
 }

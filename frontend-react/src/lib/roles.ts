@@ -11,7 +11,7 @@ function tieneRol(rol: Rol | null | undefined, permitidos: Rol[]): boolean {
   return rol === "ADMIN" || permitidos.includes(rol);
 }
 
-/** Puede subir/eliminar documentos, presionar "Procesar informacion" y
+/** Puede subir/eliminar documentos, presionar "Extracción y validación" y
  * "Enviar a Clasificacion" (antes se llamaba ESPECIALISTA, renombrado a
  * GESTOR). */
 export function puedeEnviarAClasificacion(rol: Rol | null | undefined): boolean {

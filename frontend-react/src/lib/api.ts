@@ -257,7 +257,7 @@ export function actualizarContenidoDocumento(
 
 // --- pipeline (extraccion + validacion + clasificacion + borrador) --------
 
-/** "Procesar información": extrae + valida + clasifica + genera borrador.
+/** "Extracción y validación": extrae + valida + clasifica + genera borrador.
  * NO cambia el estado del despacho (ver `enviarAClasificacion` para eso). */
 export function procesarInformacion(idDespacho: string): Promise<PipelineResultOut> {
   return apiFetch<PipelineResultOut>(`/despachos/${idDespacho}/procesar-informacion`, {
@@ -267,7 +267,7 @@ export function procesarInformacion(idDespacho: string): Promise<PipelineResultO
 
 /** Botón propio "Enviar a Clasificación": la única transición
  * REVISION_DOC -> CLASIFICACION. Exige que ya se haya presionado
- * "Procesar información" (FACTURA+BL procesados). */
+ * "Extracción y validación" (FACTURA+BL procesados). */
 export function enviarAClasificacion(idDespacho: string): Promise<DespachoOut> {
   return apiFetch<DespachoOut>(`/despachos/${idDespacho}/enviar-a-clasificacion`, {
     method: "POST",

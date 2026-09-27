@@ -17,7 +17,7 @@ const TABS_VALIDOS: TabValue[] = ["explorador", "revision", "clasificacion", "pr
 /**
  * Shell de la sección Validador: el Explorador (crear/buscar/listar
  * despachos, ver `ExploradorTab`) es la primera pestaña de la MISMA tira
- * que Revisión/Clasificación/Pre-liquidación/Comunicaciones (antes
+ * que Revisión/Pre Clasificación/Pre-liquidación/Comunicaciones (antes
  * "Correo": ahora el borrador puede marcarse para enviarse por correo,
  * WhatsApp, o ambos, ver `ComunicacionesTab`) -- ya no un panel lateral
  * aparte. No hay un despacho "activo" hasta que se elige uno ahí (o se
@@ -90,7 +90,7 @@ export function DespachoPage() {
               Revisión
             </TabsTrigger>
             <TabsTrigger value="clasificacion" disabled={!detalle}>
-              Clasificación
+              Pre Clasificación
             </TabsTrigger>
             <TabsTrigger value="preliquidacion" disabled={!detalle}>
               Pre liquidación

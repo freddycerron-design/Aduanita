@@ -255,7 +255,7 @@ function DocumentPane({
             </>
           ) : (
             <p className="rounded-xl border border-border bg-surface p-4 text-sm text-texto-secundario">
-              Pendiente de procesar. Presiona &quot;Procesar información&quot; para extraer sus datos.
+              Pendiente de procesar. Presiona &quot;Extracción y validación&quot; para extraer sus datos.
             </p>
           )}
         </div>
