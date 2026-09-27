@@ -126,6 +126,11 @@ comment on column public.despachos.estado is
 -- crea la fila con contenido_json='{}' y procesado=false (rapido, sin
 -- llamar a Gemini); al presionar "Procesar informacion" se extrae el
 -- contenido real en bloque para todos los documentos pendientes.
+--
+-- El contenido extraido no es la ultima palabra: el especialista puede
+-- corregirlo a mano (PUT .../documentos/{tipo}/contenido), y por eso la
+-- fila lleva tanto la autoevaluacion del modelo (confianza_extraccion,
+-- campos_inciertos) como la marca de quien la corrigio (editado_por/en).
 create table public.documentos_extraidos (
     id                   uuid primary key default gen_random_uuid(),
     id_despacho          uuid not null references public.despachos(id) on delete cascade,
@@ -137,11 +142,16 @@ create table public.documentos_extraidos (
                              check (metodo_extraccion in ('PYMUPDF', 'GEMINI_VISION')),
     procesado            boolean not null default false,
     confianza_extraccion float,
+    campos_inciertos     jsonb not null default '[]'::jsonb,
+    editado_por          uuid references public.perfiles_especialista(id),
+    editado_en           timestamptz,
     creado_en            timestamptz not null default now(),
     -- MVP: un solo documento de cada tipo por despacho (sin BL master+house,
     -- sin facturas multiples).
     unique (id_despacho, tipo_documento)
 );
+
+create index documentos_extraidos_editado_por_idx on public.documentos_extraidos (editado_por);
 
 comment on column public.documentos_extraidos.contenido_json is
     'Salida ya validada contra FacturaSchema / SeguroSchema / SwiftSchema / BLSchema (services/pdf_processor.py). '
@@ -152,6 +162,21 @@ comment on column public.documentos_extraidos.metodo_extraccion is
 comment on column public.documentos_extraidos.procesado is
     'true una vez que se extrajo el contenido_json real; false mientras el PDF '
     'esta subido pero pendiente de extraccion.';
+comment on column public.documentos_extraidos.confianza_extraccion is
+    'Score 0-1 que el propio modelo reporta sobre que tan segura fue su lectura del documento. '
+    'El nivel categorico (ALTA/MEDIA/BAJA) se deriva de aca en Python, nunca se le pide al modelo '
+    '(ver derivar_nivel_confianza en services/pdf_processor.py). NULL mientras procesado=false.';
+comment on column public.documentos_extraidos.campos_inciertos is
+    'Nombres de los campos del schema que el modelo marco como no leidos con seguridad, para '
+    'resaltarlos en el formulario de correccion. Se filtran contra los campos reales del schema '
+    'antes de guardar. Vacio ([]) si el modelo leyo todo con seguridad o si una persona ya reviso '
+    'el documento a mano.';
+comment on column public.documentos_extraidos.editado_por is
+    'Quien corrigio a mano el contenido_json (PUT /despachos/{id}/documentos/{tipo}/contenido). '
+    'NULL si el contenido es tal cual lo extrajo el modelo.';
+comment on column public.documentos_extraidos.editado_en is
+    'Cuando se corrigio a mano por ultima vez. Volver a subir el archivo limpia esta marca junto '
+    'con el resto de la extraccion.';
 
 
 -- ---------------------------------------------------------------------

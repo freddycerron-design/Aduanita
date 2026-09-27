@@ -1,20 +1,41 @@
 import { useState } from "react";
-import { FileJson, Image as ImageIcon } from "lucide-react";
+import { FileJson, Image as ImageIcon, Pencil } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { puedeCorregirDatosExtraidos } from "@/lib/roles";
 import { TIPOS_DOCUMENTO } from "@/lib/types";
-import type { DocumentoExtraidoOut, TipoDocumento } from "@/lib/types";
+import type {
+  DocumentoExtraidoOut,
+  EstadoDespacho,
+  NivelConfianza,
+  TipoDocumento,
+} from "@/lib/types";
+import { useProfile } from "@/hooks/useProfile";
 import { useSignedPdfUrl } from "@/hooks/useSignedPdfUrl";
+import { useActualizarContenidoDocumento } from "@/hooks/useActualizarContenidoDocumento";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DocumentContentForm } from "@/components/documents/DocumentContentForm";
 
 type ModoVisor = "JSON" | "ORIGINAL";
 
 export interface DocumentViewerProps {
+  idDespacho: string;
+  estadoDespacho: EstadoDespacho;
   documentos: DocumentoExtraidoOut[];
 }
 
 const MAX_SELECCION = 2;
+
+/** Cuanto confia el modelo en su propia lectura. El nivel lo deriva el
+ * backend desde el score numerico (services/pdf_processor.py), acá solo
+ * se le pone color y palabras. */
+const CONFIANZA_INFO: Record<NivelConfianza, { label: string; variante: "verde" | "amber" | "rojo" }> = {
+  ALTA: { label: "Lectura confiable", variante: "verde" },
+  MEDIA: { label: "Revisar datos", variante: "amber" },
+  BAJA: { label: "Lectura dudosa", variante: "rojo" },
+};
 
 /**
  * Selector de documentos (hasta 2 a la vez, con FIFO -- elegir un tercero
@@ -24,7 +45,7 @@ const MAX_SELECCION = 2;
  * con su propio toggle JSON/PDF independiente -- se puede comparar PDF
  * contra PDF, JSON contra JSON, o cruzado).
  */
-export function DocumentViewer({ documentos }: DocumentViewerProps) {
+export function DocumentViewer({ idDespacho, estadoDespacho, documentos }: DocumentViewerProps) {
   const disponibles = TIPOS_DOCUMENTO.filter((tipo) => documentos.some((d) => d.tipo_documento === tipo));
   const [seleccionados, setSeleccionados] = useState<TipoDocumento[]>([]);
 
@@ -83,7 +104,15 @@ export function DocumentViewer({ documentos }: DocumentViewerProps) {
       <div className={cn("grid gap-3", tiposAVer.length === 2 ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1")}>
         {tiposAVer.map((tipo) => {
           const documento = documentos.find((d) => d.tipo_documento === tipo);
-          return documento ? <DocumentPane key={tipo} tipo={tipo} documento={documento} /> : null;
+          return documento ? (
+            <DocumentPane
+              key={tipo}
+              tipo={tipo}
+              documento={documento}
+              idDespacho={idDespacho}
+              estadoDespacho={estadoDespacho}
+            />
+          ) : null;
         })}
       </div>
     </div>
@@ -92,20 +121,63 @@ export function DocumentViewer({ documentos }: DocumentViewerProps) {
 
 /** Una ventana individual del visor: encabezado con el tipo + toggle
  * JSON/original propio, y el contenido segun el modo elegido. El
- * "original" puede ser un PDF o una foto (JPG/PNG/WEBP) -- se distingue
- * por la extension del path guardado para elegir entre <iframe> (PDF) e
- * <img> (imagen) al mostrarlo. */
-function DocumentPane({ tipo, documento }: { tipo: TipoDocumento; documento: DocumentoExtraidoOut }) {
+ * "original" puede ser un PDF o una foto (JPG/PNG/WEBP/HEIC) -- se
+ * distingue por la extension del path guardado para elegir entre
+ * <iframe> (PDF) e <img> (imagen) al mostrarlo.
+ *
+ * El panel de datos no se desmonta al cambiar a "Original": asi se puede
+ * mirar el documento escaneado a mitad de una correccion y volver sin
+ * perder lo tipeado. */
+function DocumentPane({
+  tipo,
+  documento,
+  idDespacho,
+  estadoDespacho,
+}: {
+  tipo: TipoDocumento;
+  documento: DocumentoExtraidoOut;
+  idDespacho: string;
+  estadoDespacho: EstadoDespacho;
+}) {
   const [modo, setModo] = useState<ModoVisor>("JSON");
+  const [editando, setEditando] = useState(false);
+  const { data: perfil } = useProfile();
+  const actualizar = useActualizarContenidoDocumento(idDespacho);
   const signedUrl = useSignedPdfUrl(documento.url_pdf_storage, modo === "ORIGINAL");
-  const esImagen = /\.(jpg|jpeg|png|webp)$/i.test(documento.url_pdf_storage);
+  const esImagen = /\.(jpg|jpeg|png|webp|heic)$/i.test(documento.url_pdf_storage);
+
+  // Espejo del gate del backend: GESTOR (o ADMIN), documento ya extraido,
+  // y el despacho todavia abierto -- un FINALIZADO ya tiene su decision
+  // registrada y sus hallazgos son el registro de lo que se reviso.
+  const puedeEditar =
+    puedeCorregirDatosExtraidos(perfil?.rol) && documento.procesado && estadoDespacho !== "FINALIZADO";
+
+  const confianza = documento.nivel_confianza ? CONFIANZA_INFO[documento.nivel_confianza] : null;
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-xs font-semibold uppercase tracking-wide text-texto-secundario">
-          {tipo}
-        </span>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="truncate text-xs font-semibold uppercase tracking-wide text-texto-secundario">
+            {tipo}
+          </span>
+          {documento.editado_en ? (
+            // La revision de una persona pesa mas que el score de la
+            // maquina, asi que reemplaza al badge de confianza.
+            <Badge variant="indigo">Corregido a mano</Badge>
+          ) : (
+            confianza && (
+              <Badge
+                variant={confianza.variante}
+                title={`El modelo calificó su propia lectura con ${Math.round(
+                  (documento.confianza_extraccion ?? 0) * 100,
+                )}% de confianza`}
+              >
+                {confianza.label}
+              </Badge>
+            )
+          )}
+        </div>
         <div className="flex shrink-0 gap-1">
           <Button
             type="button"
@@ -114,7 +186,7 @@ function DocumentPane({ tipo, documento }: { tipo: TipoDocumento; documento: Doc
             onClick={() => setModo("JSON")}
           >
             <FileJson />
-            JSON
+            Datos
           </Button>
           <Button
             type="button"
@@ -128,48 +200,84 @@ function DocumentPane({ tipo, documento }: { tipo: TipoDocumento; documento: Doc
         </div>
       </div>
 
-      {modo === "JSON" ? (
-        documento.procesado ? (
-          <div className="flex flex-col gap-2">
-            {documento.metodo_extraccion && (
-              <p className="text-xs text-texto-secundario">
-                Método de extracción:{" "}
-                {documento.metodo_extraccion === "GEMINI_VISION"
-                  ? "OCR/Visión (PDF escaneado)"
-                  : "Texto digital"}
+      <div className={cn("flex flex-col gap-2", modo !== "JSON" && "hidden")}>
+        {documento.procesado ? (
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {documento.metodo_extraccion && (
+                <p className="text-xs text-texto-secundario">
+                  Método de extracción:{" "}
+                  {documento.metodo_extraccion === "GEMINI_VISION"
+                    ? "OCR/Visión (PDF escaneado)"
+                    : "Texto digital"}
+                </p>
+              )}
+              {puedeEditar && !editando && (
+                <Button type="button" size="sm" variant="outline" onClick={() => setEditando(true)}>
+                  <Pencil />
+                  Corregir datos
+                </Button>
+              )}
+            </div>
+
+            {documento.campos_inciertos.length > 0 && !editando && (
+              <p className="rounded-lg border border-amber/40 bg-amber/10 p-3 text-xs text-amber">
+                El modelo no leyó con seguridad:{" "}
+                {documento.campos_inciertos.map((campo) => campo.replace(/_/g, " ")).join(", ")}.
+                Compáralos con el original antes de continuar.
               </p>
             )}
-            <pre className="max-h-[480px] overflow-auto rounded-xl border border-border bg-surface p-4 text-xs text-texto">
-              {JSON.stringify(documento.contenido_json, null, 2)}
-            </pre>
-          </div>
+
+            {editando ? (
+              <DocumentContentForm
+                contenido={documento.contenido_json}
+                camposInciertos={documento.campos_inciertos}
+                columnasPorLista={documento.columnas_por_lista}
+                guardando={actualizar.isPending}
+                onCancelar={() => setEditando(false)}
+                onGuardar={(contenidoJson) =>
+                  actualizar.mutate(
+                    { tipoDocumento: tipo, contenidoJson },
+                    { onSuccess: () => setEditando(false) },
+                  )
+                }
+              />
+            ) : (
+              <pre className="max-h-[480px] overflow-auto rounded-xl border border-border bg-surface p-4 text-xs text-texto">
+                {JSON.stringify(documento.contenido_json, null, 2)}
+              </pre>
+            )}
+          </>
         ) : (
           <p className="rounded-xl border border-border bg-surface p-4 text-sm text-texto-secundario">
             Pendiente de procesar. Presiona &quot;Procesar información&quot; para extraer sus datos.
           </p>
-        )
-      ) : signedUrl.isLoading ? (
-        <Skeleton className="h-[480px] w-full" />
-      ) : signedUrl.isError ? (
-        <p className="rounded-xl border border-rojo/40 bg-rojo/10 p-4 text-sm text-rojo">
-          No se pudo generar la vista previa del documento
-          {signedUrl.error instanceof Error ? `: ${signedUrl.error.message}` : "."}
-        </p>
-      ) : signedUrl.data ? (
-        esImagen ? (
-          <img
-            src={signedUrl.data}
-            className="h-[480px] w-full rounded-xl border border-border object-contain bg-surface"
-            alt={`Documento original: ${tipo}`}
-          />
-        ) : (
-          <iframe
-            src={signedUrl.data}
-            className="h-[480px] w-full rounded-xl border border-border"
-            title={`Documento original: ${tipo}`}
-          />
-        )
-      ) : null}
+        )}
+      </div>
+
+      {modo === "ORIGINAL" &&
+        (signedUrl.isLoading ? (
+          <Skeleton className="h-[480px] w-full" />
+        ) : signedUrl.isError ? (
+          <p className="rounded-xl border border-rojo/40 bg-rojo/10 p-4 text-sm text-rojo">
+            No se pudo generar la vista previa del documento
+            {signedUrl.error instanceof Error ? `: ${signedUrl.error.message}` : "."}
+          </p>
+        ) : signedUrl.data ? (
+          esImagen ? (
+            <img
+              src={signedUrl.data}
+              className="h-[480px] w-full rounded-xl border border-border object-contain bg-surface"
+              alt={`Documento original: ${tipo}`}
+            />
+          ) : (
+            <iframe
+              src={signedUrl.data}
+              className="h-[480px] w-full rounded-xl border border-border"
+              title={`Documento original: ${tipo}`}
+            />
+          )
+        ) : null)}
     </div>
   );
 }

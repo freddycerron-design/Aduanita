@@ -71,6 +71,11 @@ def _hoja_documentos(libro: Workbook, documentos: list[dict]) -> None:
         fila += 1
         fila = _escribir_par(hoja, fila, "Procesado", documento.get("procesado"))
         fila = _escribir_par(hoja, fila, "Método de extracción", documento.get("metodo_extraccion"))
+        # Quien lea este Excel necesita saber si los datos de abajo son los
+        # que leyo el modelo o los que corrigio una persona.
+        fila = _escribir_par(
+            hoja, fila, "Corregido a mano", "Sí" if documento.get("editado_en") else "No"
+        )
         for clave, valor in (documento.get("contenido_json") or {}).items():
             fila = _escribir_par(hoja, fila, clave, valor)
         fila += 1  # fila en blanco entre documentos

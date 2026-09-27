@@ -18,6 +18,15 @@ export function puedeEnviarAClasificacion(rol: Rol | null | undefined): boolean 
   return tieneRol(rol, ["GESTOR"]);
 }
 
+/** Puede corregir a mano los datos que el modelo leyo de un documento
+ * (PUT /despachos/{id}/documentos/{tipo}/contenido). Mismo rol que el
+ * resto de la revision documental, pero con helper propio porque es una
+ * accion distinta: si manana la correccion se abre al liquidador, cambia
+ * aca y no en el boton de enviar a clasificacion. */
+export function puedeCorregirDatosExtraidos(rol: Rol | null | undefined): boolean {
+  return tieneRol(rol, ["GESTOR"]);
+}
+
 /** Puede aceptar/observar la propuesta de clasificacion
  * (POST /despachos/{id}/decision). */
 export function puedeDecidirClasificacion(rol: Rol | null | undefined): boolean {

@@ -10,6 +10,10 @@ Maquina de estados del despacho (3 estados, dos roles distintos):
                                                                  guarda el archivo, no llama a Gemini)
   3. DELETE /despachos/{id}/documentos/{tipo}               -> quitar un documento ya cargado (opcional;
                                                                  subir uno nuevo del mismo tipo tambien lo reemplaza)
+  3b. PUT /despachos/{id}/documentos/{tipo}/contenido       -> GESTOR: corregir a mano un dato mal leido
+                                                                 por el modelo. Valida contra el mismo schema
+                                                                 Pydantic que la extraccion y rehace la
+                                                                 validacion cruzada al instante (sin Gemini).
   4. POST /despachos/{id}/procesar-informacion              -> GESTOR, boton "Procesar informacion":
                                                                  extrae (Gemini) los documentos pendientes +
                                                                  valida + clasifica (RAG+Gemini) + genera
@@ -59,12 +63,12 @@ documentos. Dos barreras independientes lo sostienen:
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Literal, get_args, get_origin
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, computed_field
 from supabase import Client
 
 from app.config import get_settings, get_supabase_admin_client, get_supabase_user_client
@@ -86,8 +90,10 @@ from services.preliquidacion_service import calcular_preliquidacion
 from services.pdf_processor import (
     TIPO_A_SCHEMA,
     EXTENSION_POR_MIME,
+    NivelConfianza,
     TipoArchivoNoSoportadoError,
     TipoDocumento,
+    derivar_nivel_confianza,
     detectar_tipo_contenido,
     procesar_documento,
 )
@@ -260,6 +266,25 @@ class DespachoOut(BaseModel):
     id_cliente: str | None = None
 
 
+def _columnas_por_lista(tipo_documento: TipoDocumento) -> dict[str, list[str]]:
+    """Para cada campo de tipo lista del schema (ej. `items` de la factura),
+    los nombres de las columnas de sus filas.
+
+    Lo necesita el formulario de correccion manual del frontend, que arma
+    los campos a partir del JSON guardado: si la lista llego vacia no hay
+    de donde deducir las columnas, y sin esto no se podria agregar la
+    primera fila a mano.
+    """
+    columnas: dict[str, list[str]] = {}
+    for nombre, campo in TIPO_A_SCHEMA[tipo_documento].model_fields.items():
+        if get_origin(campo.annotation) is not list:
+            continue
+        argumentos = get_args(campo.annotation)
+        if argumentos and isinstance(argumentos[0], type) and issubclass(argumentos[0], BaseModel):
+            columnas[nombre] = list(argumentos[0].model_fields)
+    return columnas
+
+
 class DocumentoExtraidoOut(BaseModel):
     id: str
     tipo_documento: TipoDocumento
@@ -270,6 +295,40 @@ class DocumentoExtraidoOut(BaseModel):
     metodo_extraccion: str | None = None
     procesado: bool = False
     confianza_extraccion: float | None = None
+    # Que campos dijo el modelo que no pudo leer con seguridad, para que el
+    # formulario de correccion los resalte. Se vacia cuando una persona ya
+    # reviso el documento a mano (ver actualizar_contenido_documento).
+    campos_inciertos: list[str] = Field(default_factory=list)
+    # Marca de correccion manual: mientras sea None, el contenido_json es
+    # tal cual lo leyo el modelo.
+    editado_en: str | None = None
+
+    @computed_field
+    @property
+    def nivel_confianza(self) -> NivelConfianza | None:
+        """Etiqueta que ve el especialista, derivada del score numerico. Se
+        calcula aca y no en el frontend para que los umbrales vivan en un
+        solo lugar (services/pdf_processor.py)."""
+        if self.confianza_extraccion is None:
+            return None
+        return derivar_nivel_confianza(self.confianza_extraccion)
+
+    @computed_field
+    @property
+    def columnas_por_lista(self) -> dict[str, list[str]]:
+        """Columnas de los campos de tipo lista de este tipo de documento
+        (ver `_columnas_por_lista`)."""
+        return _columnas_por_lista(self.tipo_documento)
+
+
+class ContenidoDocumentoUpdate(BaseModel):
+    """Datos de un documento corregidos a mano por el especialista. El
+    shape queda libre a proposito: la validacion real la hace el schema
+    Pydantic del tipo de documento (TIPO_A_SCHEMA), el mismo con el que se
+    valida lo que extrae Gemini -- dos definiciones del mismo documento se
+    desincronizarian."""
+
+    contenido_json: dict
 
 
 class ResultadoValidacionOut(ResultadoValidacion):
@@ -628,16 +687,23 @@ def _ejecutar_extraccion_pendiente(admin: Client, id_despacho: str) -> None:
         tipo: TipoDocumento = fila["tipo_documento"]
         try:
             pdf_bytes = admin.storage.from_(settings.supabase_storage_bucket).download(fila["url_pdf_storage"])
-            modelo, metodo_extraccion = procesar_documento(pdf_bytes, tipo)
+            resultado = procesar_documento(pdf_bytes, tipo)
         except Exception as error:  # ExtraccionFallidaError u otro error de red/API
             if tipo in ("FACTURA", "BL"):
                 errores_criticos.append(f"{tipo}: {error}")
             continue
 
+        # No hace falta limpiar editado_por/editado_en aca: solo se extraen
+        # los documentos con procesado=false, y esa marca ya la limpia
+        # subir_documento al reemplazar el archivo (una correccion manual
+        # deja el documento en procesado=true, asi que nunca se re-extrae
+        # sola por encima).
         admin.table("documentos_extraidos").update({
-            "contenido_json": modelo.model_dump(mode="json"),
-            "metodo_extraccion": metodo_extraccion,
+            "contenido_json": resultado.datos.model_dump(mode="json"),
+            "metodo_extraccion": resultado.metodo_extraccion,
             "procesado": True,
+            "confianza_extraccion": resultado.score_confianza,
+            "campos_inciertos": resultado.campos_inciertos,
         }).eq("id_despacho", id_despacho).eq("tipo_documento", tipo).execute()
 
     if errores_criticos:
@@ -1091,6 +1157,9 @@ def subir_documento(
         path_storage, contenido, {"content-type": mime, "upsert": "true"}
     )
 
+    # El upsert reemplaza la fila entera a proposito: el archivo es otro, asi
+    # que TODO lo que se sabia del anterior deja de ser cierto -- incluida
+    # una correccion manual previa, que era sobre el documento viejo.
     fila = {
         "id_despacho": id_despacho,
         "tipo_documento": tipo_documento,
@@ -1098,6 +1167,10 @@ def subir_documento(
         "url_pdf_storage": path_storage,
         "metodo_extraccion": None,
         "procesado": False,
+        "confianza_extraccion": None,
+        "campos_inciertos": [],
+        "editado_por": None,
+        "editado_en": None,
     }
     respuesta = admin.table("documentos_extraidos").upsert(
         fila, on_conflict="id_despacho,tipo_documento"
@@ -1137,6 +1210,101 @@ def eliminar_documento(
     ).execute()
 
     return {"status": "ok"}
+
+
+def _mensaje_validacion_legible(error: ValidationError) -> str:
+    """Traduce un ValidationError de Pydantic a algo que se pueda mostrar
+    tal cual en el formulario ('monto_total: Input should be a valid
+    number'), en vez del repr completo con el modelo y las urls de
+    documentacion."""
+    return "; ".join(
+        f"{'.'.join(str(parte) for parte in detalle['loc']) or '(raiz)'}: {detalle['msg']}"
+        for detalle in error.errors()
+    )
+
+
+@app.put(
+    "/despachos/{id_despacho}/documentos/{tipo_documento}/contenido",
+    response_model=DocumentoExtraidoOut,
+)
+def actualizar_contenido_documento(
+    id_despacho: str,
+    tipo_documento: TipoDocumento,
+    datos: ContenidoDocumentoUpdate,
+    usuario: UsuarioAutenticado = Depends(get_current_staff),
+) -> dict:
+    """Corrige a mano lo que el modelo leyo de un documento.
+
+    Hasta aca, un dato mal extraido solo se podia arreglar volviendo a
+    procesar el documento y esperando que saliera distinto. Esta accion lo
+    reemplaza por una correccion directa: el cuerpo se valida contra el
+    MISMO schema Pydantic que valida la salida de Gemini
+    (TIPO_A_SCHEMA[tipo]), asi que un campo mal tipeado se rechaza con 400
+    en vez de guardar basura que despues rompa la validacion cruzada.
+
+    Guardar re-ejecuta la validacion cruzada al instante (`_ejecutar_validacion`
+    es Python puro + base de datos, sin costo de Gemini) para que las
+    discrepancias reflejen el dato corregido. La clasificacion NO se
+    rehace sola: esa si cuesta una llamada al modelo y sigue detras del
+    boton "Procesar informacion".
+    """
+    _requiere_rol(usuario, {"GESTOR"})
+
+    admin = get_supabase_admin_client()
+    despacho = _obtener_despacho_o_404(admin, id_despacho)
+
+    # Un despacho FINALIZADO ya tiene su decision registrada y sus hallazgos
+    # son el registro de lo que se reviso: re-ejecutar la validacion sobre
+    # el reescribiria esa historia.
+    if despacho["estado"] == "FINALIZADO":
+        raise HTTPException(
+            status_code=400,
+            detail="No se pueden corregir los datos de un despacho ya finalizado.",
+        )
+
+    filas = _obtener_documentos_extraidos(admin, id_despacho)
+    fila = next((f for f in filas if f["tipo_documento"] == tipo_documento), None)
+    if fila is None:
+        raise HTTPException(
+            status_code=404, detail=f"El despacho no tiene un documento de tipo {tipo_documento}."
+        )
+    if not fila.get("procesado"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"El {tipo_documento} todavia no se ha procesado. Presiona 'Procesar informacion' "
+                f"antes de corregir sus datos."
+            ),
+        )
+
+    try:
+        modelo = TIPO_A_SCHEMA[tipo_documento].model_validate(datos.contenido_json)
+    except ValidationError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Los datos corregidos no son validos -- {_mensaje_validacion_legible(error)}",
+        ) from error
+
+    respuesta = (
+        admin.table("documentos_extraidos")
+        .update({
+            "contenido_json": modelo.model_dump(mode="json"),
+            "editado_por": usuario.id,
+            "editado_en": _ahora_iso(),
+            # El formulario muestra todos los campos, asi que quien guarda
+            # acaba de revisar tambien los que el modelo habia marcado como
+            # dudosos. El score numerico se conserva como registro de lo que
+            # dijo la maquina; la marca de edicion manual es la que manda.
+            "campos_inciertos": [],
+        })
+        .eq("id_despacho", id_despacho)
+        .eq("tipo_documento", tipo_documento)
+        .execute()
+    )
+
+    _ejecutar_validacion(admin, id_despacho)
+
+    return respuesta.data[0]
 
 
 @app.post("/despachos/{id_despacho}/validar", response_model=list[ResultadoValidacionOut])

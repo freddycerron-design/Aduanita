@@ -7,32 +7,18 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Literal
 
 from google.genai import types
 from pydantic import BaseModel, Field
 
 from app.config import GEMINI_MODEL_TEXTO_Y_VISION, get_genai_client
 from services.arancel_service import SubpartidaCandidata
-from services.pdf_processor import FacturaItem
+# NivelConfianza y sus umbrales viven en pdf_processor porque los comparten
+# las dos confianzas que ve el especialista (la de la lectura de cada
+# documento y la de esta propuesta de clasificacion): si una dice "ALTA"
+# tiene que significar lo mismo que la otra.
+from services.pdf_processor import FacturaItem, NivelConfianza, derivar_nivel_confianza
 from services.rag_service import Antecedente
-
-NivelConfianza = Literal["ALTA", "MEDIA", "BAJA"]
-
-# Umbrales para derivar nivel_confianza (categorico) desde score_confianza
-# (numerico 0-1). Se derivan en Python en vez de pedirle ambos campos a
-# Gemini -- pedirle los dos por separado corria el riesgo de que se
-# contradigan entre si (ej. score_confianza=0.55 pero nivel_confianza=ALTA).
-UMBRAL_CONFIANZA_ALTA = 0.85
-UMBRAL_CONFIANZA_MEDIA = 0.6
-
-
-def _derivar_nivel_confianza(score: float) -> NivelConfianza:
-    if score >= UMBRAL_CONFIANZA_ALTA:
-        return "ALTA"
-    if score >= UMBRAL_CONFIANZA_MEDIA:
-        return "MEDIA"
-    return "BAJA"
 
 
 class _PropuestaClasificacionIA(BaseModel):
@@ -59,7 +45,7 @@ class _PropuestaClasificacionIA(BaseModel):
 class PropuestaClasificacion(BaseModel):
     """Propuesta final expuesta al resto del backend y al frontend.
     `nivel_confianza` NUNCA se le pide directamente a Gemini -- se deriva
-    de `score_confianza` (ver `_derivar_nivel_confianza`) para que las dos
+    de `score_confianza` (ver `derivar_nivel_confianza`) para que las dos
     senales de confianza nunca se contradigan entre si."""
 
     subpartida_sugerida: str
@@ -198,7 +184,7 @@ def clasificar(
     return PropuestaClasificacion(
         subpartida_sugerida=propuesta_ia.subpartida_sugerida,
         score_confianza=propuesta_ia.score_confianza,
-        nivel_confianza=_derivar_nivel_confianza(propuesta_ia.score_confianza),
+        nivel_confianza=derivar_nivel_confianza(propuesta_ia.score_confianza),
         informacion_faltante_alert=propuesta_ia.informacion_faltante_alert,
         sustento_legal_rgi=propuesta_ia.sustento_legal_rgi,
     )

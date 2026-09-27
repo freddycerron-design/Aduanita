@@ -175,6 +175,21 @@ export function eliminarDocumento(
   });
 }
 
+/** Corrige a mano los datos que el modelo leyo de un documento. El backend
+ * valida contra el mismo schema que valida la extraccion (asi que un dato
+ * mal tipeado vuelve como 400 con el campo culpable) y rehace la
+ * validacion cruzada al instante, sin llamar a Gemini. */
+export function actualizarContenidoDocumento(
+  idDespacho: string,
+  tipoDocumento: TipoDocumento,
+  contenidoJson: Record<string, unknown>,
+): Promise<DocumentoExtraidoOut> {
+  return apiFetch<DocumentoExtraidoOut>(
+    `/despachos/${idDespacho}/documentos/${tipoDocumento}/contenido`,
+    { method: "PUT", json: { contenido_json: contenidoJson } },
+  );
+}
+
 // --- pipeline (extraccion + validacion + clasificacion + borrador) --------
 
 /** "Procesar información": extrae + valida + clasifica + genera borrador.

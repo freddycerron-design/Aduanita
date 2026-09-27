@@ -68,7 +68,21 @@ export interface DocumentoExtraidoOut {
   url_pdf_storage: string;
   metodo_extraccion: string | null;
   procesado: boolean;
+  /** 0-1: que tan segura fue la lectura del modelo, segun el modelo mismo. */
   confianza_extraccion: number | null;
+  /** Derivado de `confianza_extraccion` en el backend, para que los
+   * umbrales vivan en un solo lugar (services/pdf_processor.py). */
+  nivel_confianza: NivelConfianza | null;
+  /** Campos que el modelo dijo no haber leido con seguridad. Se vacia
+   * cuando una persona ya corrigio el documento a mano. */
+  campos_inciertos: string[];
+  /** Columnas de cada campo de tipo lista (ej. `items`), sacadas del
+   * schema del backend: sin esto el formulario de correccion no podria
+   * agregar la primera fila a una lista que llego vacia. */
+  columnas_por_lista: Record<string, string[]>;
+  /** Cuando se corrigio a mano por ultima vez; null si el contenido es
+   * tal cual lo extrajo el modelo. */
+  editado_en: string | null;
 }
 
 // --- validaciones ---------------------------------------------------------

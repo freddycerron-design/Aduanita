@@ -233,7 +233,11 @@ export function RevisionTab({
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-semibold text-texto">Visor de documentos</h2>
-        <DocumentViewer documentos={documentos} />
+        <DocumentViewer
+          idDespacho={idDespacho}
+          estadoDespacho={estadoDespacho}
+          documentos={documentos}
+        />
       </section>
     </div>
   );

@@ -18,26 +18,36 @@ estrategia de extraccion:
    paginas que renderizar -- se va directo a Gemini Vision sobre el
    archivo tal cual fue subido.
 
-En ambos casos la estructuracion final la hace Gemini 1.5 Flash contra el
-schema Pydantic correspondiente (`response_json_schema`, salida JSON).
-Se prefiere el modo texto sobre vision cuando hay un PDF con texto de
-buena calidad porque es mas barato/rapido, pero el resultado final
-(un objeto Pydantic validado) es identico sin importar el camino tomado.
+En ambos casos la estructuracion final la hace Gemini contra el schema
+Pydantic correspondiente (`response_json_schema`, salida JSON). Se
+prefiere el modo texto sobre vision cuando hay un PDF con texto de buena
+calidad porque es mas barato/rapido, pero el resultado final es identico
+sin importar el camino tomado.
+
+Lo que se le pide al modelo no es el schema del documento a secas, sino
+un envoltorio que ademas lleva su propia autoevaluacion: que tan seguro
+esta de lo que leyo (`score_confianza`) y que campos concretos no pudo
+leer con seguridad (`campos_inciertos`). Eso es lo que permite mostrarle
+al especialista donde mirar primero en vez de obligarlo a revisar los
+cinco documentos campo por campo.
 """
 from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from datetime import date
+from functools import lru_cache
 from typing import Literal, Type
 
 import pymupdf as fitz  # "fitz" es el alias historico de PyMuPDF; el import moderno es "pymupdf"
 from google.genai import types
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 from app.config import GEMINI_MODEL_TEXTO_Y_VISION, get_genai_client
 
 TipoDocumento = Literal["FACTURA", "SEGURO", "SWIFT_BANCARIO", "BL", "PACKING_LIST"]
+NivelConfianza = Literal["ALTA", "MEDIA", "BAJA"]
 
 # Longitud minima de texto (en caracteres, ya sin espacios) para considerar
 # que PyMuPDF logro extraer una capa de texto util del PDF.
@@ -46,6 +56,29 @@ UMBRAL_LONGITUD_TEXTO = 200
 # descartar texto "basura" (glifos mal decodificados de PDFs escaneados
 # con una capa de OCR corrupta).
 UMBRAL_RATIO_ALFANUMERICO = 0.5
+
+# Umbrales para derivar el nivel categorico (ALTA/MEDIA/BAJA) desde el
+# score numerico 0-1 que el modelo reporta sobre si mismo. La categoria
+# NUNCA se le pide al modelo junto con el score: pedirle los dos por
+# separado corria el riesgo de que se contradigan entre si (ej.
+# score_confianza=0.55 pero nivel_confianza=ALTA).
+#
+# Viven aca, en el modulo mas bajo de la cadena, porque los comparten la
+# extraccion de documentos y el clasificador arancelario
+# (services/gemini_classifier.py los importa de aca): las dos confianzas
+# se muestran al especialista con las mismas tres etiquetas, asi que
+# tienen que partir de los mismos cortes.
+UMBRAL_CONFIANZA_ALTA = 0.85
+UMBRAL_CONFIANZA_MEDIA = 0.6
+
+
+def derivar_nivel_confianza(score: float) -> NivelConfianza:
+    """Traduce un score 0-1 a la etiqueta que ve el especialista."""
+    if score >= UMBRAL_CONFIANZA_ALTA:
+        return "ALTA"
+    if score >= UMBRAL_CONFIANZA_MEDIA:
+        return "MEDIA"
+    return "BAJA"
 
 
 class ExtraccionFallidaError(Exception):
@@ -267,8 +300,75 @@ def pdf_a_imagenes(pdf_bytes: bytes, dpi: int = 200) -> list[bytes]:
 # Paso 2: estructuracion con Gemini (texto o vision)
 # ---------------------------------------------------------------------
 
+@lru_cache(maxsize=None)
+def _envoltorio_con_confianza(schema: Type[BaseModel]) -> Type[BaseModel]:
+    """Arma (una sola vez por schema) el modelo que se le pide realmente a
+    Gemini: los datos del documento envueltos junto a su autoevaluacion.
+
+    Se construye dinamicamente en vez de escribir cinco envoltorios a mano
+    para que agregar un tipo de documento nuevo a TIPO_A_SCHEMA siga sin
+    requerir nada mas que la entrada en ese diccionario.
+    """
+    return create_model(
+        f"Extraccion{schema.__name__}",
+        datos=(schema, Field(description="Los datos leidos del documento")),
+        score_confianza=(
+            float,
+            Field(
+                ge=0,
+                le=1,
+                description=(
+                    "Que tan seguro estas de tu propia lectura, de 0 (ilegible) "
+                    "a 1 (nitido y sin ambiguedad)"
+                ),
+            ),
+        ),
+        campos_inciertos=(
+            list[str],
+            Field(
+                default_factory=list,
+                description="Nombres de los campos que no pudiste leer con seguridad",
+            ),
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class ResultadoExtraccion:
+    """Todo lo que deja procesar un documento: los datos ya validados
+    contra su schema, por que camino se obtuvieron, y que tan confiable es
+    esa lectura segun el propio modelo."""
+
+    datos: BaseModel
+    metodo_extraccion: str
+    score_confianza: float
+    nivel_confianza: NivelConfianza
+    campos_inciertos: list[str]
+
+
+def _armar_resultado(bruto: dict, schema: Type[BaseModel], metodo: str) -> ResultadoExtraccion:
+    """Valida el envoltorio crudo que devolvio Gemini y lo convierte en un
+    ResultadoExtraccion.
+
+    Los nombres de `campos_inciertos` se filtran contra los campos reales
+    del schema: el modelo a veces devuelve un nombre que no existe (lo
+    inventa o lo traduce), y guardarlo solo ensuciaria la base con marcas
+    que el formulario nunca va a poder resaltar.
+    """
+    envoltorio = _envoltorio_con_confianza(schema).model_validate(bruto)
+    campos_reales = set(schema.model_fields)
+    return ResultadoExtraccion(
+        datos=envoltorio.datos,
+        metodo_extraccion=metodo,
+        score_confianza=envoltorio.score_confianza,
+        nivel_confianza=derivar_nivel_confianza(envoltorio.score_confianza),
+        campos_inciertos=[c for c in envoltorio.campos_inciertos if c in campos_reales],
+    )
+
+
 def _prompt_estructuracion(tipo_documento: TipoDocumento) -> str:
     nombre = _NOMBRE_DOCUMENTO_LEGIBLE[tipo_documento]
+    campos = ", ".join(TIPO_A_SCHEMA[tipo_documento].model_fields)
     return (
         f"Eres un asistente experto en documentacion de comercio exterior y aduanas de Peru. "
         f"El documento adjunto es un(a) {nombre}. Extrae unicamente los datos que figuren "
@@ -277,7 +377,14 @@ def _prompt_estructuracion(tipo_documento: TipoDocumento) -> str:
         f"- No inventes ni infieras valores que no esten escritos en el documento.\n"
         f"- Si un dato no aparece, deja el campo correspondiente en null (no uses 0 ni cadenas vacias como relleno).\n"
         f"- Los montos y pesos deben ser numeros, sin simbolos de moneda ni separadores de miles.\n"
-        f"- Usa el idioma y los terminos originales del documento para los campos de texto (nombres, direcciones, descripciones)."
+        f"- Usa el idioma y los terminos originales del documento para los campos de texto (nombres, direcciones, descripciones).\n\n"
+        f"Ademas de los datos, evalua tu propia lectura -- un especialista la va a revisar y "
+        f"necesita saber donde mirar primero:\n"
+        f"- score_confianza: de 0 a 1. Bajalo si el documento esta borroso, cortado o mal escaneado, "
+        f"o si tuviste que deducir algun dato; usa valores altos solo si todo se lee nitido.\n"
+        f"- campos_inciertos: los campos que NO pudiste leer con seguridad, con estos nombres "
+        f"exactos: {campos}. Que un dato no figure en el documento no es incertidumbre (ese va en "
+        f"null y no se lista). Si leiste todo con seguridad, devuelve una lista vacia."
     )
 
 
@@ -316,8 +423,10 @@ def _generar_structured_output(contenidos: list, schema: Type[BaseModel]) -> dic
 
 def estructurar_texto_con_gemini(texto: str, tipo_documento: TipoDocumento) -> dict:
     """Estructura el texto plano (ya extraido por PyMuPDF) en el schema
-    correspondiente, usando Gemini en modo solo-texto."""
-    schema = TIPO_A_SCHEMA[tipo_documento]
+    correspondiente, usando Gemini en modo solo-texto. Devuelve el
+    envoltorio crudo (datos + autoevaluacion), que `_armar_resultado`
+    valida."""
+    schema = _envoltorio_con_confianza(TIPO_A_SCHEMA[tipo_documento])
     prompt = _prompt_estructuracion(tipo_documento)
     contenidos = [f"{prompt}\n\n--- TEXTO DEL DOCUMENTO ---\n{texto}"]
     return _generar_structured_output(contenidos, schema)
@@ -327,8 +436,9 @@ def extraer_con_gemini_vision(imagenes: list[tuple[bytes, str]], tipo_documento:
     """Estructura el documento a partir de una o mas imagenes (bytes,
     mime_type), usando Gemini Vision. Se usa tanto para las paginas
     renderizadas de un PDF escaneado (sin capa de texto util) como para un
-    documento que ya llego como foto/imagen desde un principio."""
-    schema = TIPO_A_SCHEMA[tipo_documento]
+    documento que ya llego como foto/imagen desde un principio. Devuelve
+    el envoltorio crudo, igual que `estructurar_texto_con_gemini`."""
+    schema = _envoltorio_con_confianza(TIPO_A_SCHEMA[tipo_documento])
     prompt = _prompt_estructuracion(tipo_documento)
     partes_imagen = [types.Part.from_bytes(data=img, mime_type=mime) for img, mime in imagenes]
     contenidos = [prompt, *partes_imagen]
@@ -339,9 +449,10 @@ def extraer_con_gemini_vision(imagenes: list[tuple[bytes, str]], tipo_documento:
 # Orquestador
 # ---------------------------------------------------------------------
 
-def procesar_documento(contenido: bytes, tipo_documento: TipoDocumento) -> tuple[BaseModel, str]:
-    """Procesa un documento (PDF o imagen) de principio a fin y devuelve
-    (objeto_pydantic_validado, metodo_extraccion).
+def procesar_documento(contenido: bytes, tipo_documento: TipoDocumento) -> ResultadoExtraccion:
+    """Procesa un documento (PDF o imagen) de principio a fin y devuelve un
+    `ResultadoExtraccion`: los datos ya validados contra su schema, el
+    camino que se uso, y la autoevaluacion del modelo sobre su lectura.
 
     Primero se detecta el tipo real del archivo por su firma binaria (ver
     `detectar_tipo_contenido`), nunca por la extension del nombre, para
@@ -366,8 +477,8 @@ def procesar_documento(contenido: bytes, tipo_documento: TipoDocumento) -> tuple
 
         if calidad_texto_suficiente(texto):
             try:
-                datos = estructurar_texto_con_gemini(texto, tipo_documento)
-                return schema.model_validate(datos), "PYMUPDF"
+                bruto = estructurar_texto_con_gemini(texto, tipo_documento)
+                return _armar_resultado(bruto, schema, "PYMUPDF")
             except Exception:
                 # Si la estructuracion por texto falla (p.ej. Gemini no pudo
                 # cumplir el schema con el texto disponible, o hubo un error
@@ -377,8 +488,8 @@ def procesar_documento(contenido: bytes, tipo_documento: TipoDocumento) -> tuple
 
         try:
             imagenes = [(img, "image/png") for img in pdf_a_imagenes(contenido)]
-            datos = extraer_con_gemini_vision(imagenes, tipo_documento)
-            return schema.model_validate(datos), "GEMINI_VISION"
+            bruto = extraer_con_gemini_vision(imagenes, tipo_documento)
+            return _armar_resultado(bruto, schema, "GEMINI_VISION")
         except Exception as error:
             # Cualquier falla en el ultimo recurso (schema invalido, error de
             # red/API de Gemini, JSON malformado, etc.) se reporta como una
@@ -390,8 +501,8 @@ def procesar_documento(contenido: bytes, tipo_documento: TipoDocumento) -> tuple
     # Ya es una imagen (JPG/PNG/WEBP/HEIC): no hay capa de texto que intentar
     # primero, se estructura directo con Gemini Vision.
     try:
-        datos = extraer_con_gemini_vision([(contenido, mime)], tipo_documento)
-        return schema.model_validate(datos), "GEMINI_VISION"
+        bruto = extraer_con_gemini_vision([(contenido, mime)], tipo_documento)
+        return _armar_resultado(bruto, schema, "GEMINI_VISION")
     except Exception as error:
         raise ExtraccionFallidaError(
             f"No fue posible extraer un {tipo_documento} valido de la imagen: {error}"
