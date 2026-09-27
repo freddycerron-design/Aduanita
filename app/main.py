@@ -65,7 +65,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Literal, get_args, get_origin
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, ValidationError, computed_field
@@ -965,32 +965,54 @@ def _escapar_valor_or(valor: str) -> str:
     return valor.replace("\\", "\\\\").replace(",", "\\,").replace("(", "\\(").replace(")", "\\)")
 
 
+_CAMPOS_ORDEN_DESPACHOS = ("fecha_creacion", "numero_despacho")
+
+
 @app.get("/despachos", response_model=DespachoListadoOut)
 def listar_despachos(
     pagina: int = 1,
     limite: int = 20,
     busqueda: str | None = None,
-    estado: str | None = None,
+    # Listas (?estados=A&estados=B) para los filtros "estilo Excel" de las
+    # columnas Estado y Cliente -- Query(default=None) es lo que le dice a
+    # FastAPI que un query param repetido se junte en una lista, en vez de
+    # aceptar solo el ultimo valor.
+    estados: list[str] | None = Query(default=None),
+    clientes: list[str] | None = Query(default=None),
+    orden_campo: str = "fecha_creacion",
+    orden_direccion: str = "desc",
     usuario: UsuarioAutenticado = Depends(get_current_staff),
 ) -> dict:
     """Listado paginado de despachos para la pestaña Explorador.
     `busqueda` filtra por coincidencia parcial (sin distinguir mayusculas)
-    en numero_despacho, cliente o descripcion a la vez; `estado` sigue
-    disponible como filtro exacto aparte. El nombre del gestor viaja
-    embebido via el FK `creado_por` (PostgREST resuelve el join), asi que
-    la grilla no necesita una consulta por fila para mostrarlo."""
+    en numero_despacho, cliente o descripcion a la vez; `estados`/
+    `clientes` filtran por coincidencia EXACTA contra una lista de
+    valores elegidos en el header de esas columnas (checkbox, no texto
+    libre). El nombre del gestor viaja embebido via el FK `creado_por`
+    (PostgREST resuelve el join), asi que la grilla no necesita una
+    consulta por fila para mostrarlo."""
     admin = get_supabase_admin_client()
     pagina = max(pagina, 1)
     limite = min(max(limite, 1), 100)
     inicio = (pagina - 1) * limite
 
+    if orden_campo not in _CAMPOS_ORDEN_DESPACHOS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"orden_campo debe ser uno de {_CAMPOS_ORDEN_DESPACHOS} (recibido: {orden_campo}).",
+        )
+    if orden_direccion not in ("asc", "desc"):
+        raise HTTPException(status_code=400, detail="orden_direccion debe ser 'asc' o 'desc'.")
+
     consulta = (
         admin.table("despachos")
         .select("*, gestor:perfiles_especialista!creado_por(nombre_completo)", count="exact")
-        .order("fecha_creacion", desc=True)
+        .order(orden_campo, desc=(orden_direccion == "desc"))
     )
-    if estado:
-        consulta = consulta.eq("estado", estado)
+    if estados:
+        consulta = consulta.in_("estado", estados)
+    if clientes:
+        consulta = consulta.in_("cliente", clientes)
     if busqueda and busqueda.strip():
         termino = _escapar_valor_or(busqueda.strip())
         consulta = consulta.or_(
@@ -1005,6 +1027,36 @@ def listar_despachos(
         items.append(fila)
 
     return {"items": items, "total": respuesta.count or 0}
+
+
+@app.get("/despachos/clientes-distintos", response_model=list[str])
+def listar_clientes_distintos_de_despachos(
+    usuario: UsuarioAutenticado = Depends(get_current_staff),
+) -> list[str]:
+    """Valores unicos de `despachos.cliente` que existen hoy, para poblar
+    el filtro "estilo Excel" de la columna Cliente en el Explorador.
+
+    No es lo mismo que `/admin/clientes` (los importadores REGISTRADOS en
+    la tabla `clientes`, que habilitan el portal): esto son los textos
+    libres que de hecho aparecen en algun despacho, esten o no vinculados
+    a un cliente registrado. Debe registrarse ANTES de
+    `GET /despachos/{id_despacho}` (mismo prefijo, dos segmentos): si no,
+    esa ruta dinamica capturaria "clientes-distintos" como si fuera un id.
+
+    PostgREST no ofrece `DISTINCT` a traves del query builder; se trae
+    la columna sola (liviano, es solo texto) y se deduplica en Python --
+    a esta escala (decenas o cientos de despachos, no millones) es mas
+    simple que una funcion RPC dedicada."""
+    admin = get_supabase_admin_client()
+    respuesta = admin.table("despachos").select("cliente").order("cliente").execute()
+    vistos: set[str] = set()
+    distintos: list[str] = []
+    for fila in respuesta.data or []:
+        valor = fila["cliente"]
+        if valor not in vistos:
+            vistos.add(valor)
+            distintos.append(valor)
+    return distintos
 
 
 def _armar_detalle_despacho(admin: Client, id_despacho: str) -> dict:

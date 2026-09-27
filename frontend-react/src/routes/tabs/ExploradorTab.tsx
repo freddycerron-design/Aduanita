@@ -3,11 +3,16 @@ import type { FormEvent } from "react";
 import { FolderOpen, Plus, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-import { ESTADO_INFO } from "@/lib/estado";
+import type { CampoOrdenDespachos, DireccionOrden } from "@/lib/api";
+import { ESTADO_INFO, ORDEN_ESTADOS } from "@/lib/estado";
 import { formatearFecha } from "@/lib/fecha";
+import type { EstadoDespacho } from "@/lib/types";
+import { useClientesDistintosDeDespachos } from "@/hooks/useClientesDistintosDeDespachos";
 import { useDespachosPaginados } from "@/hooks/useDespachosPaginados";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ColumnFilter } from "@/components/ui/column-filter";
+import { ColumnSort } from "@/components/ui/column-sort";
 import { Input } from "@/components/ui/input";
 import { Pagination } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,29 +21,50 @@ import { NuevoDespachoDialog } from "@/components/layout/NuevoDespachoDialog";
 
 const TAMANIO_PAGINA = 15;
 
+/** Opciones fijas del filtro de Estado -- a diferencia de Cliente, no
+ * hace falta traerlas del backend: son las 3 del enum, siempre las
+ * mismas. */
+const OPCIONES_ESTADO = ORDEN_ESTADOS.map((estado) => ({ valor: estado, etiqueta: ESTADO_INFO[estado].label }));
+
+interface Orden {
+  campo: CampoOrdenDespachos;
+  direccion: DireccionOrden;
+}
+
 /**
- * Primera pestaña de la sección Validador: crear despacho, buscar y
- * recorrer el listado completo. Antes vivía en un panel lateral angosto
- * (`ExplorerPanel`, ya eliminado) con agrupado por estado y sin paginar;
- * ahora es una grilla a lo ancho de la pantalla con paginación real de
- * backend, porque un panel de 288px no alcanza para columnas de cliente/
- * descripción/gestor.
+ * Primera pestaña de la sección Validador: crear despacho, buscar,
+ * filtrar, ordenar y recorrer el listado completo. Antes vivía en un
+ * panel lateral angosto (`ExplorerPanel`, ya eliminado) con agrupado por
+ * estado y sin paginar; ahora es una grilla a lo ancho de la pantalla,
+ * con filtros "estilo Excel" en Cliente/Estado (checkbox + buscador +
+ * Aceptar/Cancelar, ver `ColumnFilter`) y orden en Nro/Fecha creación
+ * (click en la flecha del header, ver `ColumnSort`) -- todo resuelto por
+ * el backend (`GET /despachos`), no filtrado sobre datos ya traídos.
  *
- * La búsqueda es del backend (`GET /despachos?busqueda=`), no un filtro
- * sobre datos ya traídos -- por eso solo dispara al enviar el formulario
- * (Enter o el botón), igual que `ArancelPage`, y no en cada tecla.
+ * La búsqueda de texto libre sigue el mismo patrón que `ArancelPage`:
+ * dispara al enviar el formulario (Enter o el botón), no en cada tecla.
  */
 export function ExploradorTab() {
   const [entradaBusqueda, setEntradaBusqueda] = useState("");
   const [busqueda, setBusqueda] = useState("");
+  const [estadosFiltro, setEstadosFiltro] = useState<EstadoDespacho[] | null>(null);
+  const [clientesFiltro, setClientesFiltro] = useState<string[] | null>(null);
+  const [orden, setOrden] = useState<Orden>({ campo: "fecha_creacion", direccion: "desc" });
   const [pagina, setPagina] = useState(1);
   const [dialogoAbierto, setDialogoAbierto] = useState(false);
   const navigate = useNavigate();
+
+  const { data: clientesDistintos } = useClientesDistintosDeDespachos();
+  const opcionesCliente = (clientesDistintos ?? []).map((valor) => ({ valor, etiqueta: valor }));
 
   const { data, isLoading, isFetching, isError, error } = useDespachosPaginados({
     pagina,
     limite: TAMANIO_PAGINA,
     busqueda,
+    estados: estadosFiltro ?? undefined,
+    clientes: clientesFiltro ?? undefined,
+    ordenCampo: orden.campo,
+    ordenDireccion: orden.direccion,
   });
 
   const totalPaginas = data ? Math.max(1, Math.ceil(data.total / TAMANIO_PAGINA)) : 1;
@@ -46,7 +72,26 @@ export function ExploradorTab() {
   function buscar(evento: FormEvent<HTMLFormElement>) {
     evento.preventDefault();
     setBusqueda(entradaBusqueda.trim());
-    setPagina(1); // una búsqueda nueva vuelve siempre a la primera página
+    setPagina(1); // toda busqueda/filtro/orden nuevo vuelve a la primera pagina
+  }
+
+  function aplicarEstados(seleccion: string[] | null) {
+    setEstadosFiltro(seleccion as EstadoDespacho[] | null);
+    setPagina(1);
+  }
+
+  function aplicarClientes(seleccion: string[] | null) {
+    setClientesFiltro(seleccion);
+    setPagina(1);
+  }
+
+  function ordenarPor(campo: CampoOrdenDespachos) {
+    setOrden((actual) =>
+      actual.campo === campo
+        ? { campo, direccion: actual.direccion === "asc" ? "desc" : "asc" }
+        : { campo, direccion: "asc" },
+    );
+    setPagina(1);
   }
 
   function irADespacho(id: string) {
@@ -91,8 +136,8 @@ export function ExploradorTab() {
         <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-surface px-6 py-12 text-center">
           <FolderOpen className="size-9 text-texto-secundario" strokeWidth={1.5} />
           <p className="text-sm text-texto-secundario">
-            {busqueda
-              ? `Ningún despacho coincide con "${busqueda}".`
+            {busqueda || estadosFiltro || clientesFiltro
+              ? "Ningún despacho coincide con la búsqueda o los filtros."
               : "Todavía no hay despachos. Crea el primero para empezar."}
           </p>
         </div>
@@ -101,12 +146,53 @@ export function ExploradorTab() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Nro</TableHead>
-                <TableHead>Cliente</TableHead>
+                <TableHead>
+                  <div className="flex items-center gap-1.5">
+                    Nro
+                    <ColumnSort
+                      titulo="Nro"
+                      activo={orden.campo === "numero_despacho"}
+                      direccion={orden.direccion}
+                      onClick={() => ordenarPor("numero_despacho")}
+                    />
+                  </div>
+                </TableHead>
+                <TableHead>
+                  <div className="flex items-center gap-1.5">
+                    Cliente
+                    <ColumnFilter
+                      titulo="Cliente"
+                      opciones={opcionesCliente}
+                      seleccion={clientesFiltro}
+                      onAplicar={aplicarClientes}
+                      conBusqueda
+                    />
+                  </div>
+                </TableHead>
                 <TableHead>Descripción</TableHead>
-                <TableHead>Fecha creación</TableHead>
+                <TableHead>
+                  <div className="flex items-center gap-1.5">
+                    Fecha creación
+                    <ColumnSort
+                      titulo="Fecha creación"
+                      activo={orden.campo === "fecha_creacion"}
+                      direccion={orden.direccion}
+                      onClick={() => ordenarPor("fecha_creacion")}
+                    />
+                  </div>
+                </TableHead>
                 <TableHead>Gestor</TableHead>
-                <TableHead>Estado</TableHead>
+                <TableHead>
+                  <div className="flex items-center gap-1.5">
+                    Estado
+                    <ColumnFilter
+                      titulo="Estado"
+                      opciones={OPCIONES_ESTADO}
+                      seleccion={estadosFiltro}
+                      onAplicar={aplicarEstados}
+                    />
+                  </div>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

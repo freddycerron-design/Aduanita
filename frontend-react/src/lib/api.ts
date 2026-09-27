@@ -61,7 +61,11 @@ interface ApiFetchOptions {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   json?: unknown;
   formData?: FormData;
-  query?: Record<string, string | undefined>;
+  /** Un valor `string[]` se manda como el mismo parametro repetido
+   * (`?estados=A&estados=B`) -- lo que FastAPI espera para reconstruirlo
+   * como lista (`Query(default=None)` sobre `list[str]`), no una sola
+   * entrada con comas. */
+  query?: Record<string, string | string[] | undefined>;
 }
 
 /**
@@ -78,7 +82,12 @@ async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): Promise
   const url = new URL(path, API_BASE_URL);
   if (options.query) {
     for (const [clave, valor] of Object.entries(options.query)) {
-      if (valor !== undefined) url.searchParams.set(clave, valor);
+      if (valor === undefined) continue;
+      if (Array.isArray(valor)) {
+        for (const item of valor) url.searchParams.append(clave, item);
+      } else {
+        url.searchParams.set(clave, valor);
+      }
     }
   }
 
@@ -139,11 +148,22 @@ async function apiFetchBlob(path: string): Promise<Blob> {
 
 // --- despachos --------------------------------------------------------
 
+export type CampoOrdenDespachos = "fecha_creacion" | "numero_despacho";
+export type DireccionOrden = "asc" | "desc";
+
 export interface ListarDespachosParams {
   pagina: number;
   limite: number;
   busqueda: string;
-  estado?: EstadoDespacho;
+  /** Filtro "estilo Excel" de la columna Estado -- lista de valores
+   * elegidos por checkbox; vacío/undefined = sin filtro (todos). */
+  estados?: EstadoDespacho[];
+  /** Idem para la columna Cliente -- coincidencia EXACTA contra el texto
+   * libre de `despacho.cliente`, no relacionada con la tabla `clientes`
+   * (importadores registrados). */
+  clientes?: string[];
+  ordenCampo: CampoOrdenDespachos;
+  ordenDireccion: DireccionOrden;
 }
 
 /** Listado paginado y buscable de despachos, para la pestaña Explorador.
@@ -155,9 +175,18 @@ export function listarDespachos(params: ListarDespachosParams): Promise<Despacho
       pagina: String(params.pagina),
       limite: String(params.limite),
       busqueda: params.busqueda || undefined,
-      estado: params.estado,
+      estados: params.estados,
+      clientes: params.clientes,
+      orden_campo: params.ordenCampo,
+      orden_direccion: params.ordenDireccion,
     },
   });
+}
+
+/** Valores únicos que existen hoy en `despacho.cliente`, para poblar el
+ * filtro "estilo Excel" de esa columna en el Explorador. */
+export function listarClientesDistintosDeDespachos(): Promise<string[]> {
+  return apiFetch<string[]>("/despachos/clientes-distintos");
 }
 
 export function obtenerDespacho(idDespacho: string): Promise<DespachoDetalleOut> {

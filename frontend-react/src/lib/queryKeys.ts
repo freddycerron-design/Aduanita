@@ -1,10 +1,4 @@
-/** Parametros de `useDespachosPaginados` -- forman parte de la queryKey
- * para que cada pagina/busqueda tenga su propia entrada en cache. */
-export interface ParametrosListaDespachos {
-  pagina: number;
-  limite: number;
-  busqueda: string;
-}
+import type { ListarDespachosParams } from "@/lib/api";
 
 /** Factory centralizada de query keys de TanStack Query -- evita que cada
  * hook invente su propia forma de key y rompa la invalidacion cruzada. */
@@ -16,11 +10,17 @@ export const queryKeys = {
      * `list(params)` en cache Y cualquier `detail(id)` activo -- varios
      * hooks (`useEditarBorrador`, `useEnviarAClasificacion`, etc.) dependen
      * de eso para refrescar el despacho abierto sin tener a mano su id.
-     * Con `params`, identifica la pagina/busqueda puntual que pidio la
-     * pestaña Explorador. */
-    list: (params?: ParametrosListaDespachos) =>
+     * Con `params`, identifica la pagina/busqueda/filtros/orden puntual
+     * que pidio la pestaña Explorador (mismo shape que `listarDespachos`,
+     * asi que no hay dos formas distintas de describir la misma consulta). */
+    list: (params?: ListarDespachosParams) =>
       params ? (["despachos", "list", params] as const) : (["despachos"] as const),
     detail: (id: string) => ["despachos", id] as const,
+    /** Valores distintos de `despacho.cliente`, para el filtro "estilo
+     * Excel" de esa columna -- namespace propio, distinto de
+     * `queryKeys.clientes.list()` (esa es la tabla de importadores
+     * REGISTRADOS, un concepto separado). */
+    clientesDistintos: () => ["despachos", "clientes-distintos"] as const,
   },
   perfil: (userId: string) => ["perfil", userId] as const,
   pdfSignedUrl: (pathStorage: string) => ["pdf-signed-url", pathStorage] as const,
