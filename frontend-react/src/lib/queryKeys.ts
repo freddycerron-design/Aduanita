@@ -21,6 +21,9 @@ export const queryKeys = {
      * `queryKeys.clientes.list()` (esa es la tabla de importadores
      * REGISTRADOS, un concepto separado). */
     clientesDistintos: () => ["despachos", "clientes-distintos"] as const,
+    /** Gestores (perfiles_especialista) que crearon al menos un despacho,
+     * para el filtro "estilo Excel" de esa columna. */
+    gestoresDistintos: () => ["despachos", "gestores-distintos"] as const,
   },
   perfil: (userId: string) => ["perfil", userId] as const,
   pdfSignedUrl: (pathStorage: string) => ["pdf-signed-url", pathStorage] as const,

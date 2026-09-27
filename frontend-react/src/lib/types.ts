@@ -56,6 +56,12 @@ export interface DespachoListadoOut {
   total: number;
 }
 
+/** Una entrada del filtro "estilo Excel" de la columna Gestor. */
+export interface GestorDistintoOut {
+  id: string;
+  nombre_completo: string;
+}
+
 // --- documentos ---------------------------------------------------------
 
 /** Subconjunto conocido de `contenido_json` para la FACTURA -- el resto de

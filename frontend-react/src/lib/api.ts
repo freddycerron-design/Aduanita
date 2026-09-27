@@ -14,6 +14,7 @@ import type {
   DespachoOut,
   DocumentoExtraidoOut,
   EstadoDespacho,
+  GestorDistintoOut,
   HistorialClasificacionOut,
   MetricasOut,
   PipelineResultOut,
@@ -162,6 +163,9 @@ export interface ListarDespachosParams {
    * libre de `despacho.cliente`, no relacionada con la tabla `clientes`
    * (importadores registrados). */
   clientes?: string[];
+  /** Idem para la columna Gestor -- lista de IDs (no nombres: dos
+   * cuentas podrían compartir nombre_completo), filtra por creado_por. */
+  gestores?: string[];
   ordenCampo: CampoOrdenDespachos;
   ordenDireccion: DireccionOrden;
 }
@@ -177,6 +181,7 @@ export function listarDespachos(params: ListarDespachosParams): Promise<Despacho
       busqueda: params.busqueda || undefined,
       estados: params.estados,
       clientes: params.clientes,
+      gestores: params.gestores,
       orden_campo: params.ordenCampo,
       orden_direccion: params.ordenDireccion,
     },
@@ -187,6 +192,12 @@ export function listarDespachos(params: ListarDespachosParams): Promise<Despacho
  * filtro "estilo Excel" de esa columna en el Explorador. */
 export function listarClientesDistintosDeDespachos(): Promise<string[]> {
   return apiFetch<string[]>("/despachos/clientes-distintos");
+}
+
+/** Gestores que crearon al menos un despacho, para poblar el filtro
+ * "estilo Excel" de esa columna. */
+export function listarGestoresDistintosDeDespachos(): Promise<GestorDistintoOut[]> {
+  return apiFetch<GestorDistintoOut[]>("/despachos/gestores-distintos");
 }
 
 export function obtenerDespacho(idDespacho: string): Promise<DespachoDetalleOut> {

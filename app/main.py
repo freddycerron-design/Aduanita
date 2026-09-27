@@ -285,6 +285,15 @@ class DespachoListadoOut(BaseModel):
     total: int
 
 
+class GestorDistintoOut(BaseModel):
+    """Una entrada del filtro "estilo Excel" de la columna Gestor -- el id
+    (lo que de verdad filtra, via creado_por) junto al nombre que se
+    muestra en el checkbox."""
+
+    id: str
+    nombre_completo: str
+
+
 def _columnas_por_lista(tipo_documento: TipoDocumento) -> dict[str, list[str]]:
     """Para cada campo de tipo lista del schema (ej. `items` de la factura),
     los nombres de las columnas de sus filas.
@@ -979,6 +988,9 @@ def listar_despachos(
     # aceptar solo el ultimo valor.
     estados: list[str] | None = Query(default=None),
     clientes: list[str] | None = Query(default=None),
+    # Filtra por el ID del gestor (creado_por), no por su nombre -- dos
+    # personas podrian compartir nombre_completo, el ID nunca se repite.
+    gestores: list[str] | None = Query(default=None),
     orden_campo: str = "fecha_creacion",
     orden_direccion: str = "desc",
     usuario: UsuarioAutenticado = Depends(get_current_staff),
@@ -986,14 +998,20 @@ def listar_despachos(
     """Listado paginado de despachos para la pestaña Explorador.
     `busqueda` filtra por coincidencia parcial (sin distinguir mayusculas)
     en numero_despacho, cliente o descripcion a la vez; `estados`/
-    `clientes` filtran por coincidencia EXACTA contra una lista de
-    valores elegidos en el header de esas columnas (checkbox, no texto
+    `clientes`/`gestores` filtran por coincidencia EXACTA contra una lista
+    de valores elegidos en el header de esas columnas (checkbox, no texto
     libre). El nombre del gestor viaja embebido via el FK `creado_por`
     (PostgREST resuelve el join), asi que la grilla no necesita una
-    consulta por fila para mostrarlo."""
+    consulta por fila para mostrarlo.
+
+    `limite` tope en 500 (no 100): la vista "agrupar por cliente/estado"
+    (frontend) agrupa del lado del cliente sobre TODO lo que haya
+    filtrado, en una sola pagina grande -- no pagina dentro de cada grupo.
+    Sigue habiendo un tope (nunca "sin limite") para no poder pedir la
+    tabla entera de una."""
     admin = get_supabase_admin_client()
     pagina = max(pagina, 1)
-    limite = min(max(limite, 1), 100)
+    limite = min(max(limite, 1), 500)
     inicio = (pagina - 1) * limite
 
     if orden_campo not in _CAMPOS_ORDEN_DESPACHOS:
@@ -1013,6 +1031,8 @@ def listar_despachos(
         consulta = consulta.in_("estado", estados)
     if clientes:
         consulta = consulta.in_("cliente", clientes)
+    if gestores:
+        consulta = consulta.in_("creado_por", gestores)
     if busqueda and busqueda.strip():
         termino = _escapar_valor_or(busqueda.strip())
         consulta = consulta.or_(
@@ -1057,6 +1077,37 @@ def listar_clientes_distintos_de_despachos(
             vistos.add(valor)
             distintos.append(valor)
     return distintos
+
+
+@app.get("/despachos/gestores-distintos", response_model=list[GestorDistintoOut])
+def listar_gestores_distintos_de_despachos(
+    usuario: UsuarioAutenticado = Depends(get_current_staff),
+) -> list[dict]:
+    """Gestores (perfiles_especialista) que crearon al menos un despacho,
+    para poblar el filtro "estilo Excel" de la columna Gestor.
+
+    A diferencia de clientes-distintos, el filtro real (`gestores=` en
+    `GET /despachos`) es por ID, no por nombre: dos cuentas distintas
+    podrian compartir nombre_completo, y el ID nunca se repite. Debe
+    registrarse ANTES de `GET /despachos/{id_despacho}` por el mismo
+    motivo que clientes-distintos (mismo prefijo, dos segmentos)."""
+    admin = get_supabase_admin_client()
+    respuesta = (
+        admin.table("despachos")
+        .select("creado_por, gestor:perfiles_especialista!creado_por(nombre_completo)")
+        .execute()
+    )
+    vistos: dict[str, str] = {}
+    for fila in respuesta.data or []:
+        id_gestor = fila.get("creado_por")
+        if not id_gestor or id_gestor in vistos:
+            continue
+        gestor = fila.get("gestor") or {}
+        vistos[id_gestor] = gestor.get("nombre_completo") or "(sin nombre)"
+    return sorted(
+        ({"id": id_gestor, "nombre_completo": nombre} for id_gestor, nombre in vistos.items()),
+        key=lambda g: g["nombre_completo"].lower(),
+    )
 
 
 def _armar_detalle_despacho(admin: Client, id_despacho: str) -> dict:
