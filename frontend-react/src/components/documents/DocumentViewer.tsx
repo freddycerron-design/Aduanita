@@ -200,59 +200,65 @@ function DocumentPane({
         </div>
       </div>
 
-      <div className={cn("flex flex-col gap-2", modo !== "JSON" && "hidden")}>
-        {documento.procesado ? (
-          <>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              {documento.metodo_extraccion && (
-                <p className="text-xs text-texto-secundario">
-                  Método de extracción:{" "}
-                  {documento.metodo_extraccion === "GEMINI_VISION"
-                    ? "OCR/Visión (PDF escaneado)"
-                    : "Texto digital"}
+      {/* El wrapper que oculta y el que maqueta son dos elementos distintos
+          a proposito: `hidden` y `flex` pelean por la misma propiedad
+          `display`, y cual gana dependeria del orden en que Tailwind emita
+          sus utilidades, no del orden de las clases. */}
+      <div className={cn(modo !== "JSON" && "hidden")}>
+        <div className="flex flex-col gap-2">
+          {documento.procesado ? (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                {documento.metodo_extraccion && (
+                  <p className="text-xs text-texto-secundario">
+                    Método de extracción:{" "}
+                    {documento.metodo_extraccion === "GEMINI_VISION"
+                      ? "OCR/Visión (PDF escaneado)"
+                      : "Texto digital"}
+                  </p>
+                )}
+                {puedeEditar && !editando && (
+                  <Button type="button" size="sm" variant="outline" onClick={() => setEditando(true)}>
+                    <Pencil />
+                    Corregir datos
+                  </Button>
+                )}
+              </div>
+
+              {documento.campos_inciertos.length > 0 && !editando && (
+                <p className="rounded-lg border border-amber/40 bg-amber/10 p-3 text-xs text-amber">
+                  El modelo no leyó con seguridad:{" "}
+                  {documento.campos_inciertos.map((campo) => campo.replace(/_/g, " ")).join(", ")}.
+                  Compáralos con el original antes de continuar.
                 </p>
               )}
-              {puedeEditar && !editando && (
-                <Button type="button" size="sm" variant="outline" onClick={() => setEditando(true)}>
-                  <Pencil />
-                  Corregir datos
-                </Button>
+
+              {editando ? (
+                <DocumentContentForm
+                  contenido={documento.contenido_json}
+                  camposInciertos={documento.campos_inciertos}
+                  columnasPorLista={documento.columnas_por_lista}
+                  guardando={actualizar.isPending}
+                  onCancelar={() => setEditando(false)}
+                  onGuardar={(contenidoJson) =>
+                    actualizar.mutate(
+                      { tipoDocumento: tipo, contenidoJson },
+                      { onSuccess: () => setEditando(false) },
+                    )
+                  }
+                />
+              ) : (
+                <pre className="max-h-[480px] overflow-auto rounded-xl border border-border bg-surface p-4 text-xs text-texto">
+                  {JSON.stringify(documento.contenido_json, null, 2)}
+                </pre>
               )}
-            </div>
-
-            {documento.campos_inciertos.length > 0 && !editando && (
-              <p className="rounded-lg border border-amber/40 bg-amber/10 p-3 text-xs text-amber">
-                El modelo no leyó con seguridad:{" "}
-                {documento.campos_inciertos.map((campo) => campo.replace(/_/g, " ")).join(", ")}.
-                Compáralos con el original antes de continuar.
-              </p>
-            )}
-
-            {editando ? (
-              <DocumentContentForm
-                contenido={documento.contenido_json}
-                camposInciertos={documento.campos_inciertos}
-                columnasPorLista={documento.columnas_por_lista}
-                guardando={actualizar.isPending}
-                onCancelar={() => setEditando(false)}
-                onGuardar={(contenidoJson) =>
-                  actualizar.mutate(
-                    { tipoDocumento: tipo, contenidoJson },
-                    { onSuccess: () => setEditando(false) },
-                  )
-                }
-              />
-            ) : (
-              <pre className="max-h-[480px] overflow-auto rounded-xl border border-border bg-surface p-4 text-xs text-texto">
-                {JSON.stringify(documento.contenido_json, null, 2)}
-              </pre>
-            )}
-          </>
-        ) : (
-          <p className="rounded-xl border border-border bg-surface p-4 text-sm text-texto-secundario">
-            Pendiente de procesar. Presiona &quot;Procesar información&quot; para extraer sus datos.
-          </p>
-        )}
+            </>
+          ) : (
+            <p className="rounded-xl border border-border bg-surface p-4 text-sm text-texto-secundario">
+              Pendiente de procesar. Presiona &quot;Procesar información&quot; para extraer sus datos.
+            </p>
+          )}
+        </div>
       </div>
 
       {modo === "ORIGINAL" &&
