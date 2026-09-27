@@ -10,6 +10,7 @@ import type {
   DecisionRequest,
   DespachoCreate,
   DespachoDetalleOut,
+  DespachoListadoOut,
   DespachoOut,
   DocumentoExtraidoOut,
   EstadoDespacho,
@@ -138,8 +139,25 @@ async function apiFetchBlob(path: string): Promise<Blob> {
 
 // --- despachos --------------------------------------------------------
 
-export function listarDespachos(estado?: EstadoDespacho): Promise<DespachoOut[]> {
-  return apiFetch<DespachoOut[]>("/despachos", { query: { estado } });
+export interface ListarDespachosParams {
+  pagina: number;
+  limite: number;
+  busqueda: string;
+  estado?: EstadoDespacho;
+}
+
+/** Listado paginado y buscable de despachos, para la pestaña Explorador.
+ * `busqueda` filtra en el backend por número, cliente o descripción a la
+ * vez -- no es un filtro client-side, así que solo trae la página pedida. */
+export function listarDespachos(params: ListarDespachosParams): Promise<DespachoListadoOut> {
+  return apiFetch<DespachoListadoOut>("/despachos", {
+    query: {
+      pagina: String(params.pagina),
+      limite: String(params.limite),
+      busqueda: params.busqueda || undefined,
+      estado: params.estado,
+    },
+  });
 }
 
 export function obtenerDespacho(idDespacho: string): Promise<DespachoDetalleOut> {

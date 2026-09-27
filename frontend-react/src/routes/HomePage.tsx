@@ -124,7 +124,7 @@ export function HomePage() {
 }
 
 /** Números del equipo arriba de los módulos. Cada tarjeta navega al
- * Explorador cuando tiene sentido mirar esos despachos. */
+ * Validador (pestaña Explorador) cuando tiene sentido mirar esos despachos. */
 function FranjaMetricas() {
   const { data: metricas, isLoading, isError } = useMetricas();
 

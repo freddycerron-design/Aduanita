@@ -28,17 +28,32 @@ export interface DespachoOut {
   id: string;
   numero_despacho: string;
   cliente: string;
+  /** Libre, opcional -- lo escribe el gestor al crear el despacho. */
+  descripcion: string | null;
   estado: EstadoDespacho;
   fecha_creacion: string;
   /** Cliente registrado dueño del despacho; null si solo se cargó el
    * nombre en texto libre (entonces no aparece en ningún portal). */
   id_cliente: string | null;
+  /** Nombre de quien creó el despacho. Solo lo trae el listado paginado
+   * (ver `listarDespachos`) -- el resto de endpoints traen un solo
+   * despacho y no vale la pena el join. */
+  gestor: string | null;
 }
 
 export interface DespachoCreate {
   numero_despacho: string;
   cliente: string;
+  descripcion?: string | null;
   id_cliente?: string | null;
+}
+
+/** Respuesta de GET /despachos: una página + el total de filas que hay en
+ * total (respetando la búsqueda), para dibujar los controles de
+ * paginación del Explorador sin traer todos los despachos de una. */
+export interface DespachoListadoOut {
+  items: DespachoOut[];
+  total: number;
 }
 
 // --- documentos ---------------------------------------------------------

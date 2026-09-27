@@ -87,6 +87,9 @@ create table public.despachos (
     id              uuid primary key default gen_random_uuid(),
     numero_despacho text not null unique,
     cliente         text not null,
+    -- Libre, opcional; la escribe el gestor al crear el despacho (no se
+    -- deriva de ningun documento). Se muestra y se busca en el Explorador.
+    descripcion     text,
     estado          text not null default 'REVISION_DOC'
                         check (estado in (
                             'REVISION_DOC',
@@ -105,6 +108,10 @@ create table public.despachos (
 
 create index despachos_creado_por_idx on public.despachos (creado_por);
 
+comment on column public.despachos.descripcion is
+    'Descripcion libre de la mercancia/operacion, opcional. La escribe el '
+    'gestor al crear el despacho -- no se deriva de ningun documento (esos '
+    'llegan despues). Se muestra y se busca en la pestana Explorador.';
 comment on column public.despachos.estado is
     'Maquina de estados del flujo de negocio: REVISION_DOC (subida y validacion '
     'de documentos, a cargo del especialista) -> CLASIFICACION (el especialista '

@@ -5,30 +5,40 @@ import { DespachoHeader } from "@/components/layout/DespachoHeader";
 import { ExportarDespachoBotones } from "@/components/despacho/ExportarDespachoBotones";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ExploradorTab } from "@/routes/tabs/ExploradorTab";
 import { RevisionTab } from "@/routes/tabs/RevisionTab";
 import { ClasificacionTab } from "@/routes/tabs/ClasificacionTab";
 import { PreliquidacionTab } from "@/routes/tabs/PreliquidacionTab";
 import { CorreoTab } from "@/routes/tabs/CorreoTab";
 
-type TabValue = "revision" | "clasificacion" | "preliquidacion" | "correo";
-const TABS_VALIDOS: TabValue[] = ["revision", "clasificacion", "preliquidacion", "correo"];
+type TabValue = "explorador" | "revision" | "clasificacion" | "preliquidacion" | "correo";
+const TABS_VALIDOS: TabValue[] = ["explorador", "revision", "clasificacion", "preliquidacion", "correo"];
 
 /**
- * Shell del despacho activo: header + las 4 pestanas numeradas. El
- * contenido de cada pestana vive en un componente propio (routes/tabs/*)
- * para que el flujo de Revision, Clasificacion, Pre-liquidacion y Correo
- * se puedan desarrollar de forma independiente -- este archivo solo
- * orquesta cual esta visible (sincronizado con ?tab= en la URL, asi que
- * un refresh no pierde la pestana activa) y les pasa los datos ya
- * cargados de `useDespachoDetalle`.
+ * Shell de la sección Validador: el Explorador (crear/buscar/listar
+ * despachos, ver `ExploradorTab`) es la primera pestaña de la MISMA tira
+ * que Revisión/Clasificación/Pre-liquidación/Correo -- ya no un panel
+ * lateral aparte. No hay un despacho "activo" hasta que se elige uno ahí
+ * (o se crea uno nuevo), momento en el que la URL pasa a `/despachos/:id`.
+ *
+ * Sin id (ruta `/despachos`): el Explorador es la única pestaña
+ * habilitada -- las demás no tienen sentido sin un despacho elegido, así
+ * que se deshabilitan en vez de ocultarse (para que el usuario vea que
+ * existen y por qué no puede entrar todavía).
+ *
+ * Con id (`/despachos/:id`): las 5 pestañas están disponibles. Revisión
+ * es la inicial salvo que la URL ya diga otra cosa (`?tab=`, como pone
+ * `onProcesado` al enviar a clasificación); el Explorador sigue ahí para
+ * volver al listado o abrir otro despacho sin perder de vista el actual.
  */
 export function DespachoPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: detalle, isLoading, isError, error } = useDespachoDetalle(id);
 
+  const tabPorDefecto: TabValue = id ? "revision" : "explorador";
   const tabParam = searchParams.get("tab");
-  const tabActivo: TabValue = TABS_VALIDOS.includes(tabParam as TabValue) ? (tabParam as TabValue) : "revision";
+  const tabActivo: TabValue = TABS_VALIDOS.includes(tabParam as TabValue) ? (tabParam as TabValue) : tabPorDefecto;
 
   function irATab(tab: TabValue) {
     setSearchParams((prev) => {
@@ -38,7 +48,11 @@ export function DespachoPage() {
     });
   }
 
-  if (isLoading) {
+  // Estas dos solo aplican cuando SÍ hay un id en la URL: sin él,
+  // `useDespachoDetalle` queda deshabilitada (`enabled: !!id`) y nunca
+  // esta en isLoading/isError -- el Explorador no depende de ningun
+  // despacho puntual.
+  if (id && isLoading) {
     return (
       <div className="flex flex-col gap-4 p-6">
         <Skeleton className="h-8 w-64" />
@@ -47,7 +61,7 @@ export function DespachoPage() {
     );
   }
 
-  if (isError || !detalle) {
+  if (id && (isError || !detalle)) {
     return (
       <div className="p-6 text-sm text-rojo">
         No se pudo cargar el despacho{error instanceof Error ? `: ${error.message}` : "."}
@@ -57,54 +71,69 @@ export function DespachoPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <DespachoHeader despacho={detalle.despacho}>
-        <ExportarDespachoBotones detalle={detalle} />
-      </DespachoHeader>
+      {detalle ? (
+        <DespachoHeader despacho={detalle.despacho}>
+          <ExportarDespachoBotones detalle={detalle} />
+        </DespachoHeader>
+      ) : (
+        <div className="border-b border-border px-6 py-4">
+          <h1 className="text-lg font-semibold text-texto">Despachos</h1>
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto p-6">
         <Tabs value={tabActivo} onValueChange={(valor) => irATab(valor as TabValue)}>
           <TabsList>
-            <TabsTrigger value="revision" numero={1}>
+            <TabsTrigger value="explorador">Explorador</TabsTrigger>
+            <TabsTrigger value="revision" disabled={!detalle}>
               Revisión
             </TabsTrigger>
-            <TabsTrigger value="clasificacion" numero={2}>
+            <TabsTrigger value="clasificacion" disabled={!detalle}>
               Clasificación
             </TabsTrigger>
-            <TabsTrigger value="preliquidacion" numero={3}>
+            <TabsTrigger value="preliquidacion" disabled={!detalle}>
               Pre liquidación
             </TabsTrigger>
-            <TabsTrigger value="correo" numero={4}>
+            <TabsTrigger value="correo" disabled={!detalle}>
               Correo
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="revision">
-            <RevisionTab
-              idDespacho={detalle.despacho.id}
-              estadoDespacho={detalle.despacho.estado}
-              documentos={detalle.documentos}
-              validaciones={detalle.validaciones}
-              clasificacionLista={detalle.clasificacion !== null}
-              onProcesado={() => irATab("clasificacion")}
-            />
+          <TabsContent value="explorador">
+            <ExploradorTab />
           </TabsContent>
 
-          <TabsContent value="clasificacion">
-            <ClasificacionTab
-              idDespacho={detalle.despacho.id}
-              estadoDespacho={detalle.despacho.estado}
-              documentos={detalle.documentos}
-              clasificacion={detalle.clasificacion}
-              decision={detalle.decision}
-            />
-          </TabsContent>
+          {detalle && (
+            <>
+              <TabsContent value="revision">
+                <RevisionTab
+                  idDespacho={detalle.despacho.id}
+                  estadoDespacho={detalle.despacho.estado}
+                  documentos={detalle.documentos}
+                  validaciones={detalle.validaciones}
+                  clasificacionLista={detalle.clasificacion !== null}
+                  onProcesado={() => irATab("clasificacion")}
+                />
+              </TabsContent>
 
-          <TabsContent value="preliquidacion">
-            <PreliquidacionTab idDespacho={detalle.despacho.id} documentos={detalle.documentos} />
-          </TabsContent>
+              <TabsContent value="clasificacion">
+                <ClasificacionTab
+                  idDespacho={detalle.despacho.id}
+                  estadoDespacho={detalle.despacho.estado}
+                  documentos={detalle.documentos}
+                  clasificacion={detalle.clasificacion}
+                  decision={detalle.decision}
+                />
+              </TabsContent>
 
-          <TabsContent value="correo">
-            <CorreoTab borrador={detalle.borrador} />
-          </TabsContent>
+              <TabsContent value="preliquidacion">
+                <PreliquidacionTab idDespacho={detalle.despacho.id} documentos={detalle.documentos} />
+              </TabsContent>
+
+              <TabsContent value="correo">
+                <CorreoTab borrador={detalle.borrador} />
+              </TabsContent>
+            </>
+          )}
         </Tabs>
       </div>
     </div>

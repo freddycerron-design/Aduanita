@@ -9,7 +9,6 @@ import { Toaster } from "@/components/ui/sonner";
 import { LoginPage } from "@/routes/LoginPage";
 import { DashboardLayout } from "@/routes/DashboardLayout";
 import { DespachoPage } from "@/routes/DespachoPage";
-import { EmptyDespachoState } from "@/routes/EmptyDespachoState";
 import { HomePage } from "@/routes/HomePage";
 import { ArancelPage } from "@/routes/ArancelPage";
 import { AdminPage } from "@/routes/AdminPage";
@@ -55,7 +54,10 @@ function AppRoutes() {
         }
       >
         <Route index element={<HomePage />} />
-        <Route path="despachos" element={<EmptyDespachoState />} />
+        {/* Sin id (lista/Explorador) y con id (detalle) renderizan el mismo
+            shell -- ver DespachoPage, donde el Explorador es la primera
+            pestaña de la misma tira que Revisión/Clasificación/etc. */}
+        <Route path="despachos" element={<DespachoPage />} />
         <Route path="despachos/:id" element={<DespachoPage />} />
         <Route path="aranceles" element={<ArancelPage />} />
         <Route path="admin" element={<AdminPage />} />

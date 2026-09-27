@@ -1,35 +1,26 @@
-import type { MouseEvent } from "react";
 import type { LucideIcon } from "lucide-react";
-import { BookOpen, CircleUser, Files, Home, Settings } from "lucide-react";
-import { NavLink, useLocation } from "react-router-dom";
+import { BookOpen, CircleUser, FileCheck2, Home, Settings } from "lucide-react";
+import { NavLink } from "react-router-dom";
 
 import { esAdmin } from "@/lib/roles";
 import type { Rol } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export type PanelLateral = "archivos" | "cuenta";
-
-/** Un item del rail es "route" (una sección de la app: la barra marca
- * dónde estás, y solo una puede estarlo) o "panel" (Cuenta: abre el panel
- * lateral angosto sin moverte de página, por eso se resalta distinto). */
-type ItemRuta = {
-  kind: "route";
+interface ItemRuta {
   path: string;
   icono: LucideIcon;
   etiqueta: string;
-  /** Panel lateral que acompaña a esta sección. Sin esto, la sección se ve
-   * a ancho completo y entrar cierra el panel que hubiera quedado abierto. */
-  panel?: PanelLateral;
-};
-type ItemPanel = { kind: "panel"; id: PanelLateral; icono: LucideIcon; etiqueta: string };
+}
 
 interface IconRailProps {
-  /** `null` = panel lateral colapsado. */
-  panelActivo: PanelLateral | null;
-  /** Abre el panel si está cerrado, lo cierra si ya estaba abierto. */
-  onAlternarPanel: (panel: PanelLateral) => void;
-  /** Deja el panel en un estado concreto, al entrar o salir de una sección. */
-  onFijarPanel: (panel: PanelLateral | null) => void;
+  /** true = el panel de Cuenta está abierto. Es el único panel lateral
+   * que queda (el Explorador dejó de ser uno -- ver DespachoPage), así
+   * que no hace falta un tipo union para esto. */
+  cuentaAbierta: boolean;
+  onAlternarCuenta: () => void;
+  /** Cerrar Cuenta al navegar a otra sección: es un panel aparte que no
+   * tiene sentido dejar abierto sobre una página distinta. */
+  onCerrarCuenta: () => void;
   /** Determina si el item "Configuración" se muestra -- solo ADMIN. */
   rol: Rol | null | undefined;
   /** true = barra ancha con icono + etiqueta de texto; false = solo
@@ -40,38 +31,22 @@ interface IconRailProps {
   email: string | null | undefined;
 }
 
-const ITEM_HOME: ItemRuta = { kind: "route", path: "/", icono: Home, etiqueta: "Home" };
+const ITEM_HOME: ItemRuta = { path: "/", icono: Home, etiqueta: "Home" };
 
-const ITEM_EXPLORADOR: ItemRuta = {
-  kind: "route",
-  path: "/despachos",
-  icono: Files,
-  etiqueta: "Explorador",
-  panel: "archivos",
-};
+// Mismo icono que la tarjeta "Validador Documental (Docfy)" del Home
+// (ver MODULOS en HomePage.tsx): es la misma sección, solo que aca se
+// llama por su nombre corto.
+const ITEM_VALIDADOR: ItemRuta = { path: "/despachos", icono: FileCheck2, etiqueta: "Validador" };
 
-const ITEM_ARANCEL: ItemRuta = {
-  kind: "route",
-  path: "/aranceles",
-  icono: BookOpen,
-  etiqueta: "Aranceles",
-};
+const ITEM_ARANCEL: ItemRuta = { path: "/aranceles", icono: BookOpen, etiqueta: "Aranceles" };
 
-const ITEM_CONFIGURACION: ItemRuta = {
-  kind: "route",
-  path: "/admin",
-  icono: Settings,
-  etiqueta: "Configuración",
-};
-
-const ITEM_CUENTA: ItemPanel = { kind: "panel", id: "cuenta", icono: CircleUser, etiqueta: "Cuenta" };
+const ITEM_CONFIGURACION: ItemRuta = { path: "/admin", icono: Settings, etiqueta: "Configuración" };
 
 /**
  * `resaltado` separa las dos cosas distintas que la barra puede estar
  * diciendo: "estás en esta sección" (coral, como mucho una a la vez) y
- * "este panel está abierto" (gris, no te moviste de sección). Antes las
- * dos usaban el mismo coral, así que abrir un panel dejaba dos items
- * marcados como seleccionados al mismo tiempo.
+ * "el panel de Cuenta está abierto" (gris, no compite con la sección
+ * activa).
  */
 function clasesIcono(resaltado: "no" | "seccion" | "panel", expandido: boolean): string {
   return cn(
@@ -86,55 +61,29 @@ function clasesIcono(resaltado: "no" | "seccion" | "panel", expandido: boolean):
 
 /**
  * Columna del rail lateral tipo VSCode. Cada item de arriba es una
- * sección con URL propia, así que la marca coral siempre sale de la ruta
- * actual y nunca hay dos secciones marcadas. El Explorador es la sección
- * de despachos: entrar desde otra página navega y abre su panel; volver a
- * clickearlo estando ya dentro colapsa o expande el panel sin navegar
- * (navegar cerraría el despacho que estuviera abierto).
+ * sección con URL propia (Home, Validador, Aranceles, Configuración) --
+ * la marca coral sale de la ruta actual y nunca hay dos secciones
+ * marcadas a la vez.
  *
  * Cuenta va aparte, empujada al fondo con un spacer `mt-auto`: no es una
- * sección sino un panel, y se resalta en gris para no competir con la
- * sección activa. Se monta dentro de la columna que arma
- * `DashboardLayout` (que ademas coloca el boton del logo arriba, con su
- * propio toggle de `expandido`).
+ * sección con página propia sino un panel lateral angosto, y se resalta
+ * en gris para no competir con la sección activa. Se monta dentro de la
+ * columna que arma `DashboardLayout` (que además coloca el botón del
+ * logo arriba, con su propio toggle de `expandido`).
  */
 export function IconRail({
-  panelActivo,
-  onAlternarPanel,
-  onFijarPanel,
+  cuentaAbierta,
+  onAlternarCuenta,
+  onCerrarCuenta,
   rol,
   expandido,
   email,
 }: IconRailProps) {
-  const { pathname } = useLocation();
-
   const secciones: ItemRuta[] = esAdmin(rol)
-    ? [ITEM_HOME, ITEM_EXPLORADOR, ITEM_ARANCEL, ITEM_CONFIGURACION]
-    : [ITEM_HOME, ITEM_EXPLORADOR, ITEM_ARANCEL];
+    ? [ITEM_HOME, ITEM_VALIDADOR, ITEM_ARANCEL, ITEM_CONFIGURACION]
+    : [ITEM_HOME, ITEM_VALIDADOR, ITEM_ARANCEL];
 
-  /** true si ya estamos dentro de la sección, incluidas sus subrutas
-   * (p.ej. /despachos/:id cuenta como Explorador). */
-  function enSeccion(path: string): boolean {
-    if (path === "/") return pathname === "/";
-    return pathname === path || pathname.startsWith(`${path}/`);
-  }
-
-  function alClickSeccion(evento: MouseEvent, item: ItemRuta) {
-    if (!item.panel) {
-      // Sección a ancho completo: no dejar abierto el panel de otra.
-      onFijarPanel(null);
-      return;
-    }
-    if (enSeccion(item.path)) {
-      evento.preventDefault(); // ya estamos acá: colapsar/expandir, no navegar
-      onAlternarPanel(item.panel);
-    } else {
-      onFijarPanel(item.panel);
-    }
-  }
-
-  const cuentaAbierta = panelActivo === "cuenta";
-  const etiquetaCuenta = email ?? ITEM_CUENTA.etiqueta;
+  const etiquetaCuenta = email ?? "Cuenta";
 
   return (
     <nav
@@ -146,7 +95,7 @@ export function IconRail({
           key={item.path}
           to={item.path}
           end={item.path === "/"}
-          onClick={(evento) => alClickSeccion(evento, item)}
+          onClick={onCerrarCuenta}
           title={item.etiqueta}
           aria-label={item.etiqueta}
           className={({ isActive }) => clasesIcono(isActive ? "seccion" : "no", expandido)}
@@ -163,10 +112,10 @@ export function IconRail({
         title={etiquetaCuenta}
         aria-label={etiquetaCuenta}
         aria-pressed={cuentaAbierta}
-        onClick={() => onAlternarPanel(ITEM_CUENTA.id)}
+        onClick={onAlternarCuenta}
         className={clasesIcono(cuentaAbierta ? "panel" : "no", expandido)}
       >
-        <ITEM_CUENTA.icono className="size-5 shrink-0" />
+        <CircleUser className="size-5 shrink-0" />
         {expandido && <span className="truncate text-sm font-medium">{etiquetaCuenta}</span>}
       </button>
     </nav>

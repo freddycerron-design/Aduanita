@@ -19,6 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 /** Centinela del select: "sin cliente registrado" (Radix Select no acepta
  * un value=""). Se traduce a null al enviar. */
@@ -27,6 +28,7 @@ const SIN_CLIENTE = "__sin_cliente__";
 const nuevoDespachoSchema = z.object({
   numero_despacho: z.string().min(1, "El número de despacho es obligatorio."),
   cliente: z.string().min(1, "El cliente es obligatorio."),
+  descripcion: z.string(),
   id_cliente: z.string(),
 });
 
@@ -61,7 +63,7 @@ export function NuevoDespachoDialog({ open, onOpenChange }: NuevoDespachoDialogP
     formState: { errors },
   } = useForm<NuevoDespachoFormValues>({
     resolver: zodResolver(nuevoDespachoSchema),
-    defaultValues: { numero_despacho: "", cliente: "", id_cliente: SIN_CLIENTE },
+    defaultValues: { numero_despacho: "", cliente: "", descripcion: "", id_cliente: SIN_CLIENTE },
   });
 
   // Al cerrarse (cancelar, Escape, click afuera) se limpia el formulario
@@ -82,6 +84,7 @@ export function NuevoDespachoDialog({ open, onOpenChange }: NuevoDespachoDialogP
     const payload = {
       numero_despacho: valores.numero_despacho,
       cliente: valores.cliente,
+      descripcion: valores.descripcion.trim() || null,
       id_cliente: valores.id_cliente === SIN_CLIENTE ? null : valores.id_cliente,
     };
     mutate(payload, {
@@ -137,6 +140,17 @@ export function NuevoDespachoDialog({ open, onOpenChange }: NuevoDespachoDialogP
             <Label htmlFor="cliente">Nombre del cliente</Label>
             <Input id="cliente" disabled={isPending} {...register("cliente")} />
             {errors.cliente && <p className="text-xs text-rojo">{errors.cliente.message}</p>}
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="descripcion">Descripción (opcional)</Label>
+            <Textarea
+              id="descripcion"
+              rows={2}
+              placeholder="Qué trae el despacho, para identificarlo en el Explorador"
+              disabled={isPending}
+              {...register("descripcion")}
+            />
           </div>
 
           <DialogFooter>

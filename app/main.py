@@ -251,6 +251,9 @@ def _requiere_rol(usuario: UsuarioAutenticado, roles_permitidos: set[str]) -> No
 class DespachoCreate(BaseModel):
     numero_despacho: str
     cliente: str
+    # Libre, opcional -- identifica de un vistazo que trae el despacho en
+    # la grilla del Explorador antes de que haya documentos procesados.
+    descripcion: str | None = None
     # Opcional: vincula el despacho a un cliente registrado, lo que lo hace
     # visible en el portal de ese importador. Sin esto el despacho existe
     # igual, pero solo con el nombre en texto libre y sin portal.
@@ -261,9 +264,25 @@ class DespachoOut(BaseModel):
     id: str
     numero_despacho: str
     cliente: str
+    descripcion: str | None = None
     estado: str
     fecha_creacion: str
     id_cliente: str | None = None
+    # Nombre de quien creo el despacho (perfiles_especialista.nombre_completo
+    # via el FK creado_por). Solo lo puebla el listado paginado (ver
+    # listar_despachos): un embed por fila no vale la pena en los demas
+    # endpoints, que ya traen un solo despacho a la vez.
+    gestor: str | None = None
+
+
+class DespachoListadoOut(BaseModel):
+    """Respuesta de GET /despachos: la pagina pedida + el total de filas
+    que hay en total (ignorando la paginacion, respetando la busqueda) --
+    lo que necesita la grilla del Explorador para dibujar sus controles de
+    pagina sin tener que traer todos los despachos de una."""
+
+    items: list[DespachoOut]
+    total: int
 
 
 def _columnas_por_lista(tipo_documento: TipoDocumento) -> dict[str, list[str]]:
@@ -928,6 +947,7 @@ def crear_despacho(datos: DespachoCreate, usuario: UsuarioAutenticado = Depends(
     fila = {
         "numero_despacho": datos.numero_despacho,
         "cliente": datos.cliente,
+        "descripcion": datos.descripcion,
         "creado_por": usuario.id,
         "id_cliente": datos.id_cliente,
     }
@@ -935,15 +955,56 @@ def crear_despacho(datos: DespachoCreate, usuario: UsuarioAutenticado = Depends(
     return respuesta.data[0]
 
 
-@app.get("/despachos", response_model=list[DespachoOut])
+def _escapar_valor_or(valor: str) -> str:
+    """Escapa los caracteres que PostgREST interpreta como sintaxis dentro
+    de un filtro `.or_(...)` (la coma separa condiciones, los parentesis
+    agrupan), para que un termino de busqueda que los contenga (ej. un
+    cliente escrito "Comercial Sur (SAC), Perú") no rompa el filtro ni se
+    cuele como una condicion aparte. Verificado contra Supabase real: sin
+    esto, ese mismo termino devuelve un error de sintaxis del filtro."""
+    return valor.replace("\\", "\\\\").replace(",", "\\,").replace("(", "\\(").replace(")", "\\)")
+
+
+@app.get("/despachos", response_model=DespachoListadoOut)
 def listar_despachos(
-    estado: str | None = None, usuario: UsuarioAutenticado = Depends(get_current_staff)
-) -> list[dict]:
+    pagina: int = 1,
+    limite: int = 20,
+    busqueda: str | None = None,
+    estado: str | None = None,
+    usuario: UsuarioAutenticado = Depends(get_current_staff),
+) -> dict:
+    """Listado paginado de despachos para la pestaña Explorador.
+    `busqueda` filtra por coincidencia parcial (sin distinguir mayusculas)
+    en numero_despacho, cliente o descripcion a la vez; `estado` sigue
+    disponible como filtro exacto aparte. El nombre del gestor viaja
+    embebido via el FK `creado_por` (PostgREST resuelve el join), asi que
+    la grilla no necesita una consulta por fila para mostrarlo."""
     admin = get_supabase_admin_client()
-    consulta = admin.table("despachos").select("*").order("fecha_creacion", desc=True)
+    pagina = max(pagina, 1)
+    limite = min(max(limite, 1), 100)
+    inicio = (pagina - 1) * limite
+
+    consulta = (
+        admin.table("despachos")
+        .select("*, gestor:perfiles_especialista!creado_por(nombre_completo)", count="exact")
+        .order("fecha_creacion", desc=True)
+    )
     if estado:
         consulta = consulta.eq("estado", estado)
-    return consulta.execute().data or []
+    if busqueda and busqueda.strip():
+        termino = _escapar_valor_or(busqueda.strip())
+        consulta = consulta.or_(
+            f"numero_despacho.ilike.%{termino}%,cliente.ilike.%{termino}%,descripcion.ilike.%{termino}%"
+        )
+
+    respuesta = consulta.range(inicio, inicio + limite - 1).execute()
+    items = []
+    for fila in respuesta.data or []:
+        gestor = fila.pop("gestor", None)
+        fila["gestor"] = gestor["nombre_completo"] if gestor else None
+        items.append(fila)
+
+    return {"items": items, "total": respuesta.count or 0}
 
 
 def _armar_detalle_despacho(admin: Client, id_despacho: str) -> dict:

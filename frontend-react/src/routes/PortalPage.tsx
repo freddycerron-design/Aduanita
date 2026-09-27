@@ -3,6 +3,7 @@ import { FolderOpen } from "lucide-react";
 import logo from "@/assets/logo_aduafy.webp";
 import { supabase } from "@/lib/supabase";
 import { ESTADO_INFO } from "@/lib/estado";
+import { formatearFecha } from "@/lib/fecha";
 import { useAuthStore } from "@/hooks/useAuthStore";
 import { usePortalDespachos } from "@/hooks/usePortalDespachos";
 import { useProfile } from "@/hooks/useProfile";
@@ -10,12 +11,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-
-/** Formatea una fecha ISO como "12 mar 2026"; cadena vacía si no hay. */
-function fecha(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("es-PE", { day: "2-digit", month: "short", year: "numeric" });
-}
 
 /**
  * Portal del importador: superficie SEPARADA del sistema interno (no
@@ -92,10 +87,10 @@ export function PortalPage() {
                         <Badge variant={info.variant}>{info.label}</Badge>
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-xs text-texto-secundario">
-                        {fecha(despacho.fecha_creacion)}
+                        {formatearFecha(despacho.fecha_creacion)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-xs text-texto-secundario">
-                        {fecha(despacho.actualizado_en)}
+                        {formatearFecha(despacho.actualizado_en)}
                       </TableCell>
                     </TableRow>
                   );
