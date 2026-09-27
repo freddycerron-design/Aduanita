@@ -29,7 +29,8 @@ export function DashboardLayout() {
 
   // Clickear el icono ya activo lo colapsa (mismo comportamiento que el
   // Explorer de VSCode); clickear el otro icono, o el mismo estando
-  // colapsado, lo abre.
+  // colapsado, lo abre. Usado por Cuenta (panel puro) y por Explorador
+  // cuando ya estás dentro de esa sección (ver IconRail::alClickSeccion).
   function alternarPanel(panel: PanelLateral) {
     setPanelActivo((actual) => (actual === panel ? null : panel));
   }
@@ -67,7 +68,8 @@ export function DashboardLayout() {
         </button>
         <IconRail
           panelActivo={panelActivo}
-          onCambiarPanel={alternarPanel}
+          onAlternarPanel={alternarPanel}
+          onFijarPanel={setPanelActivo}
           rol={perfil?.rol}
           expandido={railExpandido}
           email={email}
