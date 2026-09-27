@@ -6,19 +6,26 @@ import { AccountPanel } from "@/components/layout/AccountPanel";
 import { ExplorerPanel } from "@/components/layout/ExplorerPanel";
 import type { PanelLateral } from "@/components/layout/IconRail";
 import { IconRail } from "@/components/layout/IconRail";
+import { useAuthStore } from "@/hooks/useAuthStore";
 import { useProfile } from "@/hooks/useProfile";
 import { cn } from "@/lib/utils";
 
 /**
  * Shell tipo VSCode: columna de iconos siempre visible (con el logo
  * arriba) + panel lateral colapsable (Explorador de despachos o Cuenta) +
- * el despacho activo (o el estado vacio) ocupando el resto via <Outlet/>.
+ * el despacho activo (o el Home/estado vacio) ocupando el resto via
+ * <Outlet/>.
  */
 export function DashboardLayout() {
-  // `null` = panel lateral colapsado. Arranca en "archivos" (Explorador
-  // visible por defecto).
-  const [panelActivo, setPanelActivo] = useState<PanelLateral | null>("archivos");
+  // `null` = panel lateral colapsado. Arranca colapsado -- Home (la
+  // pagina de entrada) se ve mejor a ancho completo; el usuario abre el
+  // Explorador cuando lo necesita.
+  const [panelActivo, setPanelActivo] = useState<PanelLateral | null>(null);
+  // true = rail ancho con icono + etiqueta de texto (modo por defecto);
+  // false = solo iconos centrados, togglea con el boton del logo.
+  const [railExpandido, setRailExpandido] = useState(true);
   const { data: perfil } = useProfile();
+  const email = useAuthStore((state) => state.session?.user.email);
 
   // Clickear el icono ya activo lo colapsa (mismo comportamiento que el
   // Explorer de VSCode); clickear el otro icono, o el mismo estando
@@ -38,9 +45,33 @@ export function DashboardLayout() {
 
   return (
     <div className="flex h-dvh bg-background text-texto">
-      <div className="flex w-14 shrink-0 flex-col items-center border-r border-border bg-surface">
-        <img src={logo} alt="Aduafy" className="mt-4 w-10" />
-        <IconRail panelActivo={panelActivo} onCambiarPanel={alternarPanel} rol={perfil?.rol} />
+      <div
+        className={cn(
+          "flex shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-200 ease-in-out",
+          railExpandido ? "w-56" : "w-14",
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => setRailExpandido((actual) => !actual)}
+          title="Aduafy"
+          aria-label={railExpandido ? "Colapsar la barra lateral" : "Expandir la barra lateral"}
+          className={cn(
+            "mx-2 mt-3 flex items-center gap-2.5 rounded-lg px-2 py-2 text-texto transition-colors",
+            "hover:bg-surface-border/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            !railExpandido && "justify-center px-0",
+          )}
+        >
+          <img src={logo} alt="" className="w-8 shrink-0" />
+          {railExpandido && <span className="truncate text-sm font-bold">Aduafy</span>}
+        </button>
+        <IconRail
+          panelActivo={panelActivo}
+          onCambiarPanel={alternarPanel}
+          rol={perfil?.rol}
+          expandido={railExpandido}
+          email={email}
+        />
       </div>
 
       <div

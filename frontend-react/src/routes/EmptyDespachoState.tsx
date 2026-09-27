@@ -7,7 +7,7 @@ export function EmptyDespachoState() {
     <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
       <FolderOpen className="size-10 text-texto-secundario" strokeWidth={1.5} />
       <p className="text-sm text-texto-secundario">
-        Crea un despacho nuevo o elige uno del panel de Archivos para empezar.
+        Crea un despacho nuevo o elige uno del panel de Explorador para empezar.
       </p>
     </div>
   );
