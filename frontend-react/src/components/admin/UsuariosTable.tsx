@@ -13,10 +13,13 @@ export interface UsuariosTableProps {
   onEditar: (usuario: UsuarioOut) => void;
 }
 
-const VARIANTE_ROL: Record<UsuarioOut["rol"], "coral" | "amber" | "verde"> = {
+const VARIANTE_ROL: Record<UsuarioOut["rol"], "coral" | "amber" | "verde" | "indigo"> = {
   ADMIN: "coral",
   LIQUIDADOR: "amber",
   GESTOR: "verde",
+  // Indigo para distinguir de un vistazo las cuentas EXTERNAS del portal
+  // de los 3 roles del equipo interno.
+  CLIENTE: "indigo",
 };
 
 /** Tabla de usuarios -- mismo patrón que `ReglasValidacionTable`: el

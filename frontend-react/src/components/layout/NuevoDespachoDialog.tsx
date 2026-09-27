@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { z } from "zod";
 
 import { useCrearDespacho } from "@/hooks/useCrearDespacho";
+import { useClientes } from "@/hooks/useClientes";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -17,10 +18,16 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+/** Centinela del select: "sin cliente registrado" (Radix Select no acepta
+ * un value=""). Se traduce a null al enviar. */
+const SIN_CLIENTE = "__sin_cliente__";
 
 const nuevoDespachoSchema = z.object({
   numero_despacho: z.string().min(1, "El número de despacho es obligatorio."),
   cliente: z.string().min(1, "El cliente es obligatorio."),
+  id_cliente: z.string(),
 });
 
 type NuevoDespachoFormValues = z.infer<typeof nuevoDespachoSchema>;
@@ -34,19 +41,27 @@ interface NuevoDespachoDialogProps {
  * Modal para crear un despacho nuevo (numero + cliente, ambos
  * obligatorios). El despacho arranca siempre en REVISION_DOC del lado del
  * backend, asi que tras crearlo navegamos directo a su pagina de detalle.
+ *
+ * Opcionalmente se puede vincular a un cliente REGISTRADO (tabla
+ * clientes): eso es lo que hace que el despacho aparezca en el portal de
+ * ese importador. Sin vincular, el despacho existe igual pero solo con el
+ * nombre en texto libre.
  */
 export function NuevoDespachoDialog({ open, onOpenChange }: NuevoDespachoDialogProps) {
   const navigate = useNavigate();
   const { mutate, isPending } = useCrearDespacho();
+  const { data: clientes } = useClientes();
 
   const {
     register,
     handleSubmit,
     reset,
+    watch,
+    setValue,
     formState: { errors },
   } = useForm<NuevoDespachoFormValues>({
     resolver: zodResolver(nuevoDespachoSchema),
-    defaultValues: { numero_despacho: "", cliente: "" },
+    defaultValues: { numero_despacho: "", cliente: "", id_cliente: SIN_CLIENTE },
   });
 
   // Al cerrarse (cancelar, Escape, click afuera) se limpia el formulario
@@ -55,8 +70,21 @@ export function NuevoDespachoDialog({ open, onOpenChange }: NuevoDespachoDialogP
     if (!open) reset();
   }, [open, reset]);
 
+  /** Elegir un cliente registrado completa tambien el nombre en texto
+   * libre, para no tener que escribirlo dos veces. */
+  function elegirCliente(id: string) {
+    setValue("id_cliente", id);
+    const elegido = (clientes ?? []).find((c) => c.id === id);
+    if (elegido) setValue("cliente", elegido.razon_social, { shouldValidate: true });
+  }
+
   function onSubmit(valores: NuevoDespachoFormValues) {
-    mutate(valores, {
+    const payload = {
+      numero_despacho: valores.numero_despacho,
+      cliente: valores.cliente,
+      id_cliente: valores.id_cliente === SIN_CLIENTE ? null : valores.id_cliente,
+    };
+    mutate(payload, {
       onSuccess: (despacho) => {
         onOpenChange(false);
         reset();
@@ -86,7 +114,27 @@ export function NuevoDespachoDialog({ open, onOpenChange }: NuevoDespachoDialogP
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="cliente">Cliente</Label>
+            <Label>Cliente registrado (opcional)</Label>
+            <Select value={watch("id_cliente")} onValueChange={elegirCliente} disabled={isPending}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={SIN_CLIENTE}>Sin vincular</SelectItem>
+                {(clientes ?? []).map((cliente) => (
+                  <SelectItem key={cliente.id} value={cliente.id}>
+                    {cliente.razon_social}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-texto-secundario">
+              Vincularlo hace que el despacho aparezca en el portal de ese importador.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="cliente">Nombre del cliente</Label>
             <Input id="cliente" disabled={isPending} {...register("cliente")} />
             {errors.cliente && <p className="text-xs text-rojo">{errors.cliente.message}</p>}
           </div>

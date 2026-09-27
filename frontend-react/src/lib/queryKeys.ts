@@ -20,6 +20,12 @@ export const queryKeys = {
     list: () => ["usuarios"] as const,
   },
   metricas: () => ["metricas"] as const,
+  clientes: {
+    list: () => ["clientes"] as const,
+  },
+  portal: {
+    despachos: () => ["portal", "despachos"] as const,
+  },
   arancel: {
     busqueda: (q: string) => ["arancel", q] as const,
   },

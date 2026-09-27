@@ -14,7 +14,9 @@ export const TIPOS_DOCUMENTO: TipoDocumento[] = ["FACTURA", "SEGURO", "SWIFT_BAN
 
 export type EstadoDespacho = "REVISION_DOC" | "CLASIFICACION" | "FINALIZADO";
 
-export type Rol = "GESTOR" | "LIQUIDADOR" | "ADMIN";
+/** Los 3 primeros son el equipo interno; CLIENTE es una cuenta EXTERNA
+ * de solo lectura (portal del importador), no un 4to rol del equipo. */
+export type Rol = "GESTOR" | "LIQUIDADOR" | "ADMIN" | "CLIENTE";
 
 export type Severidad = "ALTA" | "MEDIA" | "NINGUNA";
 
@@ -28,11 +30,15 @@ export interface DespachoOut {
   cliente: string;
   estado: EstadoDespacho;
   fecha_creacion: string;
+  /** Cliente registrado dueño del despacho; null si solo se cargó el
+   * nombre en texto libre (entonces no aparece en ningún portal). */
+  id_cliente: string | null;
 }
 
 export interface DespachoCreate {
   numero_despacho: string;
   cliente: string;
+  id_cliente?: string | null;
 }
 
 // --- documentos ---------------------------------------------------------
@@ -290,6 +296,8 @@ export interface UsuarioOut {
   rol: Rol;
   activo: boolean;
   creado_en: string;
+  /** Solo para cuentas con rol CLIENTE: a qué importador pertenecen. */
+  id_cliente: string | null;
 }
 
 export interface UsuarioCreate {
@@ -297,12 +305,38 @@ export interface UsuarioCreate {
   password: string;
   nombre_completo: string;
   rol: Rol;
+  id_cliente?: string | null;
 }
 
 export interface UsuarioUpdate {
   nombre_completo: string;
   rol: Rol;
   activo: boolean;
+  id_cliente?: string | null;
   /** Si se omite (undefined/vacío), no se toca la contraseña actual. */
   password?: string | null;
+}
+
+// --- clientes y portal del importador ---------------------------------
+
+export interface ClienteUpsert {
+  razon_social: string;
+  ruc?: string | null;
+  activo: boolean;
+}
+
+export interface ClienteOut extends ClienteUpsert {
+  id: string;
+  creado_en: string;
+  actualizado_en: string;
+}
+
+/** Lo ÚNICO que el portal expone de un despacho. Si un campo no está acá,
+ * el backend no lo devuelve (ver PortalDespachoOut en app/main.py). */
+export interface PortalDespachoOut {
+  id: string;
+  numero_despacho: string;
+  estado: EstadoDespacho;
+  fecha_creacion: string;
+  actualizado_en: string | null;
 }

@@ -5,8 +5,9 @@ import { useProfile } from "@/hooks/useProfile";
 import { useReglasValidacion } from "@/hooks/useReglasValidacion";
 import { useCargosEspeciales } from "@/hooks/useCargosEspeciales";
 import { useUsuarios } from "@/hooks/useUsuarios";
+import { useClientes } from "@/hooks/useClientes";
 import { esAdmin } from "@/lib/roles";
-import type { CargoEspecialArancelOut, ReglaValidacionOut, UsuarioOut } from "@/lib/types";
+import type { CargoEspecialArancelOut, ClienteOut, ReglaValidacionOut, UsuarioOut } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,6 +17,8 @@ import { CargoEspecialForm } from "@/components/admin/CargoEspecialForm";
 import { CargosEspecialesTable } from "@/components/admin/CargosEspecialesTable";
 import { UsuarioForm } from "@/components/admin/UsuarioForm";
 import { UsuariosTable } from "@/components/admin/UsuariosTable";
+import { ClienteForm } from "@/components/admin/ClienteForm";
+import { ClientesTable } from "@/components/admin/ClientesTable";
 
 /**
  * Panel de administracion: CRUD de reglas de validacion (el motor
@@ -31,12 +34,15 @@ export function AdminPage() {
   const { data: reglas, isLoading: reglasCargando } = useReglasValidacion();
   const { data: cargos, isLoading: cargosCargando } = useCargosEspeciales();
   const { data: usuarios, isLoading: usuariosCargando } = useUsuarios();
+  const { data: clientes, isLoading: clientesCargando } = useClientes();
   const [dialogoAbierto, setDialogoAbierto] = useState(false);
   const [reglaEditando, setReglaEditando] = useState<ReglaValidacionOut | null>(null);
   const [dialogoCargoAbierto, setDialogoCargoAbierto] = useState(false);
   const [cargoEditando, setCargoEditando] = useState<CargoEspecialArancelOut | null>(null);
   const [dialogoUsuarioAbierto, setDialogoUsuarioAbierto] = useState(false);
   const [usuarioEditando, setUsuarioEditando] = useState<UsuarioOut | null>(null);
+  const [dialogoClienteAbierto, setDialogoClienteAbierto] = useState(false);
+  const [clienteEditando, setClienteEditando] = useState<ClienteOut | null>(null);
 
   if (perfilCargando) {
     return (
@@ -87,6 +93,16 @@ export function AdminPage() {
   function abrirEditarUsuario(usuario: UsuarioOut) {
     setUsuarioEditando(usuario);
     setDialogoUsuarioAbierto(true);
+  }
+
+  function abrirCrearCliente() {
+    setClienteEditando(null);
+    setDialogoClienteAbierto(true);
+  }
+
+  function abrirEditarCliente(cliente: ClienteOut) {
+    setClienteEditando(cliente);
+    setDialogoClienteAbierto(true);
   }
 
   return (
@@ -161,6 +177,30 @@ export function AdminPage() {
       )}
 
       <UsuarioForm open={dialogoUsuarioAbierto} onOpenChange={setDialogoUsuarioAbierto} usuario={usuarioEditando} />
+
+      <Separator className="my-8" />
+
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-4">
+        <div>
+          <h1 className="text-base font-semibold text-texto">Clientes</h1>
+          <p className="text-sm text-texto-secundario">
+            Los importadores dueños de los despachos. Registrar un cliente permite vincularle despachos
+            y darle acceso al portal (con una cuenta de rol Cliente).
+          </p>
+        </div>
+        <Button type="button" onClick={abrirCrearCliente}>
+          <Plus className="size-4" />
+          Nuevo cliente
+        </Button>
+      </div>
+
+      {clientesCargando ? (
+        <Skeleton className="h-64 w-full" />
+      ) : (
+        <ClientesTable clientes={clientes ?? []} onEditar={abrirEditarCliente} />
+      )}
+
+      <ClienteForm open={dialogoClienteAbierto} onOpenChange={setDialogoClienteAbierto} cliente={clienteEditando} />
     </div>
   );
 }

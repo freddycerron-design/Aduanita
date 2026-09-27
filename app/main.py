@@ -40,8 +40,21 @@ reglas_validacion, interpretadas genericamente por ese mismo modulo.
 /admin/cargos-especiales-arancel (GET/POST/PUT/DELETE) es el CRUD de
 tasas de antidumping/derecho especifico por subpartida (ver
 Pre-liquidacion). /admin/usuarios (GET/POST/PUT/DELETE) es el CRUD de
-usuarios y roles (GESTOR/LIQUIDADOR/ADMIN) via la API de Auth de
-Supabase -- crea/edita/elimina la cuenta real, no solo el perfil.
+usuarios y roles via la API de Auth de Supabase -- crea/edita/elimina la
+cuenta real, no solo el perfil. /admin/clientes (GET/POST/PUT/DELETE) es
+el CRUD de los importadores, que es lo que habilita el portal externo.
+
+Portal del cliente (/portal/*): superficie separada para el importador.
+Una cuenta con rol CLIENTE ve SOLO el estado y las fechas de sus propios
+despachos -- nunca hallazgos, clasificacion, pre-liquidacion ni
+documentos. Dos barreras independientes lo sostienen:
+  1. En la API: `get_current_staff` rechaza cuentas CLIENTE en todo
+     endpoint interno, y los endpoints /portal filtran por el id_cliente
+     del perfil (nunca por un parametro de la request).
+  2. En la base: las RLS policies acotan la lectura directa contra
+     PostgREST/Storage al personal interno, con una policy propia para
+     que el cliente solo alcance sus despachos (ver database/schema.sql,
+     secciones 8, 9 y 15).
 """
 from __future__ import annotations
 
@@ -133,12 +146,16 @@ class UsuarioAutenticado(BaseModel):
     email: str | None
     rol: str
     access_token: str
+    # Solo para cuentas de portal (rol CLIENTE): a que importador pertenecen.
+    # None para el personal interno.
+    id_cliente: str | None = None
 
 
 def get_current_user(authorization: str = Header(...)) -> UsuarioAutenticado:
     """Valida el JWT de Supabase Auth enviado en el header Authorization
     (formato 'Bearer <token>') y devuelve el usuario autenticado, incluyendo
-    su rol de negocio (GESTOR/LIQUIDADOR/ADMIN) desde perfiles_especialista."""
+    su rol de negocio (GESTOR/LIQUIDADOR/ADMIN interno, o CLIENTE externo
+    del portal) desde perfiles_especialista."""
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Falta el header 'Authorization: Bearer <token>'.")
 
@@ -153,11 +170,62 @@ def get_current_user(authorization: str = Header(...)) -> UsuarioAutenticado:
         raise HTTPException(status_code=401, detail="Token invalido o expirado.")
 
     perfil = (
-        admin.table("perfiles_especialista").select("rol").eq("id", resultado.user.id).execute()
+        admin.table("perfiles_especialista")
+        .select("rol, id_cliente")
+        .eq("id", resultado.user.id)
+        .execute()
     )
-    rol = perfil.data[0]["rol"] if perfil.data else "GESTOR"
+    # Sin perfil no hay rol: se rechaza en vez de asumir uno. Antes esto
+    # caia por defecto en GESTOR, lo cual con cuentas externas en el
+    # sistema seria una escalada de privilegios -- p.ej. al eliminar un
+    # cliente, la cascada borra el perfil de sus cuentas de portal pero la
+    # cuenta de Auth sigue viva, y con el default vieja esa cuenta pasaba
+    # a ser tratada como personal interno en su siguiente login.
+    if not perfil.data:
+        raise HTTPException(
+            status_code=403,
+            detail="Tu cuenta no tiene un perfil asignado. Contacta al administrador.",
+        )
 
-    return UsuarioAutenticado(id=resultado.user.id, email=resultado.user.email, rol=rol, access_token=token)
+    fila = perfil.data[0]
+    return UsuarioAutenticado(
+        id=resultado.user.id,
+        email=resultado.user.email,
+        rol=fila["rol"],
+        access_token=token,
+        id_cliente=fila.get("id_cliente"),
+    )
+
+
+def get_current_staff(usuario: UsuarioAutenticado = Depends(get_current_user)) -> UsuarioAutenticado:
+    """Igual que `get_current_user`, pero rechaza las cuentas EXTERNAS del
+    portal (rol CLIENTE).
+
+    Todo endpoint interno depende de esta funcion y no de
+    `get_current_user`: varios endpoints de lectura (listar despachos,
+    exportar Excel, metricas...) no tenian mas control que "estar
+    autenticado", lo cual dejo de alcanzar al existir cuentas de cliente
+    -- sin esto, un importador podria listar los despachos de todos. El
+    backend consulta la base con service_role, asi que las policies RLS
+    no lo cubren: la barrera tiene que estar aca."""
+    if usuario.rol == "CLIENTE":
+        raise HTTPException(
+            status_code=403,
+            detail="Esta acción es solo para el personal interno de la agencia.",
+        )
+    return usuario
+
+
+def get_current_cliente(usuario: UsuarioAutenticado = Depends(get_current_user)) -> UsuarioAutenticado:
+    """Inversa de `get_current_staff`: solo cuentas de portal, y solo si
+    tienen un cliente vinculado (una cuenta CLIENTE sin id_cliente no
+    puede ver nada -- cierra por defecto)."""
+    if usuario.rol != "CLIENTE" or not usuario.id_cliente:
+        raise HTTPException(
+            status_code=403,
+            detail="Esta sección es solo para cuentas de cliente del portal.",
+        )
+    return usuario
 
 
 def _requiere_rol(usuario: UsuarioAutenticado, roles_permitidos: set[str]) -> None:
@@ -177,6 +245,10 @@ def _requiere_rol(usuario: UsuarioAutenticado, roles_permitidos: set[str]) -> No
 class DespachoCreate(BaseModel):
     numero_despacho: str
     cliente: str
+    # Opcional: vincula el despacho a un cliente registrado, lo que lo hace
+    # visible en el portal de ese importador. Sin esto el despacho existe
+    # igual, pero solo con el nombre en texto libre y sin portal.
+    id_cliente: str | None = None
 
 
 class DespachoOut(BaseModel):
@@ -185,6 +257,7 @@ class DespachoOut(BaseModel):
     cliente: str
     estado: str
     fecha_creacion: str
+    id_cliente: str | None = None
 
 
 class DocumentoExtraidoOut(BaseModel):
@@ -350,7 +423,9 @@ class MetricasOut(BaseModel):
     hallazgos_altos_abiertos: int
 
 
-RolUsuario = Literal["GESTOR", "LIQUIDADOR", "ADMIN"]
+# CLIENTE es una cuenta EXTERNA del portal, no un 4to rol del equipo
+# interno -- ver get_current_staff/get_current_cliente.
+RolUsuario = Literal["GESTOR", "LIQUIDADOR", "ADMIN", "CLIENTE"]
 
 
 class UsuarioOut(BaseModel):
@@ -360,6 +435,9 @@ class UsuarioOut(BaseModel):
     rol: RolUsuario
     activo: bool
     creado_en: str
+    # Obligatorio en la practica para rol CLIENTE (sin esto la cuenta no ve
+    # nada); siempre None para el personal interno.
+    id_cliente: str | None = None
 
 
 class UsuarioCreate(BaseModel):
@@ -367,16 +445,45 @@ class UsuarioCreate(BaseModel):
     password: str
     nombre_completo: str
     rol: RolUsuario
+    id_cliente: str | None = None
 
 
 class UsuarioUpdate(BaseModel):
     nombre_completo: str
     rol: RolUsuario
     activo: bool
+    id_cliente: str | None = None
     # Si viene, resetea la contrasena de Auth; si no, se ignora (no se
     # puede "vaciar" una contrasena, omitir el campo es la forma de no
     # tocarla).
     password: str | None = None
+
+
+class ClienteUpsert(BaseModel):
+    razon_social: str
+    ruc: str | None = None
+    activo: bool = True
+
+
+class ClienteOut(ClienteUpsert):
+    id: str
+    creado_en: str
+    actualizado_en: str
+
+
+class PortalDespachoOut(BaseModel):
+    """Vista que el importador ve de SU despacho en el portal.
+
+    Deliberadamente minima: estado y fechas, nada del trabajo interno --
+    ni hallazgos de validacion, ni la propuesta de clasificacion, ni la
+    pre-liquidacion, ni los documentos originales. Si algo no esta en
+    este modelo, no sale por el portal."""
+
+    id: str
+    numero_despacho: str
+    estado: str
+    fecha_creacion: str
+    actualizado_en: str | None = None
 
 
 # ---------------------------------------------------------------------
@@ -644,8 +751,52 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/portal/despachos", response_model=list[PortalDespachoOut])
+def portal_listar_despachos(
+    usuario: UsuarioAutenticado = Depends(get_current_cliente),
+) -> list[dict]:
+    """Portal del cliente: los despachos del importador autenticado.
+
+    El filtro por `id_cliente` sale del perfil del usuario, NUNCA de un
+    parametro de la request -- asi no hay forma de pedir los despachos de
+    otro cliente cambiando la URL. `response_model=PortalDespachoOut`
+    ademas recorta la respuesta a estado y fechas aunque la consulta
+    trajera mas columnas."""
+    admin = get_supabase_admin_client()
+    respuesta = (
+        admin.table("despachos")
+        .select("id, numero_despacho, estado, fecha_creacion, actualizado_en")
+        .eq("id_cliente", usuario.id_cliente)
+        .order("fecha_creacion", desc=True)
+        .execute()
+    )
+    return respuesta.data or []
+
+
+@app.get("/portal/despachos/{id_despacho}", response_model=PortalDespachoOut)
+def portal_obtener_despacho(
+    id_despacho: str,
+    usuario: UsuarioAutenticado = Depends(get_current_cliente),
+) -> dict:
+    """Detalle de UN despacho del portal. La pertenencia se comprueba en la
+    misma consulta (`id` + `id_cliente`): pedir el id de un despacho ajeno
+    devuelve 404, no 403 -- no confirma ni desmiente que ese despacho
+    exista."""
+    admin = get_supabase_admin_client()
+    respuesta = (
+        admin.table("despachos")
+        .select("id, numero_despacho, estado, fecha_creacion, actualizado_en")
+        .eq("id", id_despacho)
+        .eq("id_cliente", usuario.id_cliente)
+        .execute()
+    )
+    if not respuesta.data:
+        raise HTTPException(status_code=404, detail="No existe ese despacho.")
+    return respuesta.data[0]
+
+
 @app.get("/metricas", response_model=MetricasOut)
-def obtener_metricas(usuario: UsuarioAutenticado = Depends(get_current_user)) -> dict:
+def obtener_metricas(usuario: UsuarioAutenticado = Depends(get_current_staff)) -> dict:
     """Numeros de la pantalla de inicio: cuantos despachos hay en cada
     estado y cuantos hallazgos criticos siguen abiertos. Cualquier
     autenticado puede verlos (son agregados del equipo, no datos de un
@@ -679,7 +830,7 @@ def obtener_metricas(usuario: UsuarioAutenticado = Depends(get_current_user)) ->
 def buscar_en_arancel(
     q: str,
     limite: int = 25,
-    usuario: UsuarioAutenticado = Depends(get_current_user),
+    usuario: UsuarioAutenticado = Depends(get_current_staff),
 ) -> list[SubpartidaCandidata]:
     """Consulta libre del Arancel Nacional (tabla partidas_arancelarias, la
     misma que ya alimenta al clasificador como contexto). Dos modos segun
@@ -706,12 +857,13 @@ def buscar_en_arancel(
 
 
 @app.post("/despachos", response_model=DespachoOut)
-def crear_despacho(datos: DespachoCreate, usuario: UsuarioAutenticado = Depends(get_current_user)) -> dict:
+def crear_despacho(datos: DespachoCreate, usuario: UsuarioAutenticado = Depends(get_current_staff)) -> dict:
     admin = get_supabase_admin_client()
     fila = {
         "numero_despacho": datos.numero_despacho,
         "cliente": datos.cliente,
         "creado_por": usuario.id,
+        "id_cliente": datos.id_cliente,
     }
     respuesta = admin.table("despachos").insert(fila).execute()
     return respuesta.data[0]
@@ -719,7 +871,7 @@ def crear_despacho(datos: DespachoCreate, usuario: UsuarioAutenticado = Depends(
 
 @app.get("/despachos", response_model=list[DespachoOut])
 def listar_despachos(
-    estado: str | None = None, usuario: UsuarioAutenticado = Depends(get_current_user)
+    estado: str | None = None, usuario: UsuarioAutenticado = Depends(get_current_staff)
 ) -> list[dict]:
     admin = get_supabase_admin_client()
     consulta = admin.table("despachos").select("*").order("fecha_creacion", desc=True)
@@ -776,13 +928,13 @@ def _armar_detalle_despacho(admin: Client, id_despacho: str) -> dict:
 
 
 @app.get("/despachos/{id_despacho}", response_model=DespachoDetalleOut)
-def obtener_despacho(id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_user)) -> dict:
+def obtener_despacho(id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_staff)) -> dict:
     admin = get_supabase_admin_client()
     return _armar_detalle_despacho(admin, id_despacho)
 
 
 @app.get("/despachos/{id_despacho}/exportar-excel")
-def exportar_despacho_excel(id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_user)) -> Response:
+def exportar_despacho_excel(id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_staff)) -> Response:
     """Exporta los mismos datos de `obtener_despacho` a un libro de Excel
     (4 hojas: Despacho, Documentos, Validaciones, Clasificación). La
     exportacion a JSON no tiene endpoint propio -- el frontend ya tiene
@@ -800,7 +952,7 @@ def exportar_despacho_excel(id_despacho: str, usuario: UsuarioAutenticado = Depe
 
 @app.get("/despachos/{id_despacho}/preliquidacion", response_model=PreliquidacionDetalleOut)
 def obtener_preliquidacion(
-    id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_user)
+    id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_staff)
 ) -> dict:
     """Trae la pre-liquidacion ya calculada (si existe) mas la subpartida
     vigente y el default de cargos_especiales_arancel para esa subpartida,
@@ -830,7 +982,7 @@ def obtener_preliquidacion(
 def calcular_preliquidacion_despacho(
     id_despacho: str,
     datos: CalcularPreliquidacionRequest,
-    usuario: UsuarioAutenticado = Depends(get_current_user),
+    usuario: UsuarioAutenticado = Depends(get_current_staff),
 ) -> dict:
     """Calcula (o recalcula) los tributos del despacho y sobreescribe el
     snapshot en `preliquidaciones` (upsert por id_despacho). El especialista
@@ -891,7 +1043,7 @@ def subir_documento(
     id_despacho: str,
     tipo_documento: TipoDocumento = Form(...),
     archivo: UploadFile = File(...),
-    usuario: UsuarioAutenticado = Depends(get_current_user),
+    usuario: UsuarioAutenticado = Depends(get_current_staff),
 ) -> dict:
     """Sube el documento (PDF o imagen) a Storage y registra un marcador
     'pendiente de procesar' -- NO llama a Gemini aqui (por eso es rapida).
@@ -960,7 +1112,7 @@ def subir_documento(
 def eliminar_documento(
     id_despacho: str,
     tipo_documento: TipoDocumento,
-    usuario: UsuarioAutenticado = Depends(get_current_user),
+    usuario: UsuarioAutenticado = Depends(get_current_staff),
 ) -> dict:
     """Elimina un documento ya cargado (PDF en Storage + fila en
     documentos_extraidos), para que el especialista pueda quitarlo antes de
@@ -988,7 +1140,7 @@ def eliminar_documento(
 
 
 @app.post("/despachos/{id_despacho}/validar", response_model=list[ResultadoValidacionOut])
-def validar_despacho(id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_user)) -> list[dict]:
+def validar_despacho(id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_staff)) -> list[dict]:
     admin = get_supabase_admin_client()
     _obtener_despacho_o_404(admin, id_despacho)
     resultados = _ejecutar_validacion(admin, id_despacho)
@@ -996,7 +1148,7 @@ def validar_despacho(id_despacho: str, usuario: UsuarioAutenticado = Depends(get
 
 
 @app.post("/despachos/{id_despacho}/clasificar", response_model=PropuestaClasificacionOut)
-def clasificar_despacho(id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_user)) -> dict:
+def clasificar_despacho(id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_staff)) -> dict:
     admin = get_supabase_admin_client()
     _obtener_despacho_o_404(admin, id_despacho)
     propuesta = _ejecutar_clasificacion(admin, id_despacho)
@@ -1005,7 +1157,7 @@ def clasificar_despacho(id_despacho: str, usuario: UsuarioAutenticado = Depends(
 
 @app.post("/despachos/{id_despacho}/generar-borrador", response_model=BorradorCorreoOut)
 def generar_borrador_despacho(
-    id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_user)
+    id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_staff)
 ) -> dict:
     admin = get_supabase_admin_client()
     _obtener_despacho_o_404(admin, id_despacho)
@@ -1016,7 +1168,7 @@ def generar_borrador_despacho(
 def editar_borrador(
     id_borrador: str,
     datos: ActualizarBorradorRequest,
-    usuario: UsuarioAutenticado = Depends(get_current_user),
+    usuario: UsuarioAutenticado = Depends(get_current_staff),
 ) -> dict:
     cliente_usuario = get_supabase_user_client(usuario.access_token)
     actualizado = actualizar_borrador_editado(cliente_usuario, id_borrador, datos.cuerpo_editado, usuario.id)
@@ -1027,7 +1179,7 @@ def editar_borrador(
 def registrar_decision(
     id_despacho: str,
     datos: DecisionRequest,
-    usuario: UsuarioAutenticado = Depends(get_current_user),
+    usuario: UsuarioAutenticado = Depends(get_current_staff),
 ) -> dict:
     # Solo el liquidador (o un admin) puede aceptar/observar la propuesta
     # de clasificacion -- es la accion que cierra el flujo del despacho.
@@ -1078,7 +1230,7 @@ def registrar_decision(
 
 @app.post("/despachos/{id_despacho}/procesar-informacion", response_model=PipelineResultOut)
 def procesar_informacion(
-    id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_user)
+    id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_staff)
 ) -> dict:
     """Accion del especialista ("Procesar informacion"): extrae con Gemini
     los documentos pendientes -> valida -> clasifica -> genera-borrador. NO
@@ -1108,7 +1260,7 @@ def procesar_informacion(
 
 @app.post("/despachos/{id_despacho}/enviar-a-clasificacion", response_model=DespachoOut)
 def enviar_a_clasificacion(
-    id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_user)
+    id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_staff)
 ) -> dict:
     """Accion del especialista, boton propio "Enviar a Clasificacion": es
     la UNICA transicion de REVISION_DOC -> CLASIFICACION. A diferencia de
@@ -1151,7 +1303,7 @@ def enviar_a_clasificacion(
 # ---------------------------------------------------------------------
 
 @app.get("/admin/reglas-validacion", response_model=list[ReglaValidacionOut])
-def listar_reglas_validacion(usuario: UsuarioAutenticado = Depends(get_current_user)) -> list[dict]:
+def listar_reglas_validacion(usuario: UsuarioAutenticado = Depends(get_current_staff)) -> list[dict]:
     _requiere_rol(usuario, set())
     admin = get_supabase_admin_client()
     return admin.table("reglas_validacion").select("*").order("nombre").execute().data or []
@@ -1159,7 +1311,7 @@ def listar_reglas_validacion(usuario: UsuarioAutenticado = Depends(get_current_u
 
 @app.post("/admin/reglas-validacion", response_model=ReglaValidacionOut)
 def crear_regla_validacion(
-    datos: ReglaValidacionUpsert, usuario: UsuarioAutenticado = Depends(get_current_user)
+    datos: ReglaValidacionUpsert, usuario: UsuarioAutenticado = Depends(get_current_staff)
 ) -> dict:
     _requiere_rol(usuario, set())
     admin = get_supabase_admin_client()
@@ -1178,7 +1330,7 @@ def crear_regla_validacion(
 
 @app.put("/admin/reglas-validacion/{id_regla}", response_model=ReglaValidacionOut)
 def actualizar_regla_validacion(
-    id_regla: str, datos: ReglaValidacionUpsert, usuario: UsuarioAutenticado = Depends(get_current_user)
+    id_regla: str, datos: ReglaValidacionUpsert, usuario: UsuarioAutenticado = Depends(get_current_staff)
 ) -> dict:
     _requiere_rol(usuario, set())
     admin = get_supabase_admin_client()
@@ -1198,7 +1350,7 @@ def actualizar_regla_validacion(
 
 @app.delete("/admin/reglas-validacion/{id_regla}")
 def eliminar_regla_validacion(
-    id_regla: str, usuario: UsuarioAutenticado = Depends(get_current_user)
+    id_regla: str, usuario: UsuarioAutenticado = Depends(get_current_staff)
 ) -> dict:
     _requiere_rol(usuario, set())
     admin = get_supabase_admin_client()
@@ -1226,7 +1378,7 @@ def _validar_cargo_especial_o_400(admin: Client, datos: CargoEspecialArancelUpse
 
 
 @app.get("/admin/cargos-especiales-arancel", response_model=list[CargoEspecialArancelOut])
-def listar_cargos_especiales(usuario: UsuarioAutenticado = Depends(get_current_user)) -> list[dict]:
+def listar_cargos_especiales(usuario: UsuarioAutenticado = Depends(get_current_staff)) -> list[dict]:
     _requiere_rol(usuario, set())
     admin = get_supabase_admin_client()
     return admin.table("cargos_especiales_arancel").select("*").order("subpartida").execute().data or []
@@ -1234,7 +1386,7 @@ def listar_cargos_especiales(usuario: UsuarioAutenticado = Depends(get_current_u
 
 @app.post("/admin/cargos-especiales-arancel", response_model=CargoEspecialArancelOut)
 def crear_cargo_especial(
-    datos: CargoEspecialArancelUpsert, usuario: UsuarioAutenticado = Depends(get_current_user)
+    datos: CargoEspecialArancelUpsert, usuario: UsuarioAutenticado = Depends(get_current_staff)
 ) -> dict:
     _requiere_rol(usuario, set())
     admin = get_supabase_admin_client()
@@ -1254,7 +1406,7 @@ def crear_cargo_especial(
 
 @app.put("/admin/cargos-especiales-arancel/{id_cargo}", response_model=CargoEspecialArancelOut)
 def actualizar_cargo_especial(
-    id_cargo: str, datos: CargoEspecialArancelUpsert, usuario: UsuarioAutenticado = Depends(get_current_user)
+    id_cargo: str, datos: CargoEspecialArancelUpsert, usuario: UsuarioAutenticado = Depends(get_current_staff)
 ) -> dict:
     _requiere_rol(usuario, set())
     admin = get_supabase_admin_client()
@@ -1275,7 +1427,7 @@ def actualizar_cargo_especial(
 
 @app.delete("/admin/cargos-especiales-arancel/{id_cargo}")
 def eliminar_cargo_especial(
-    id_cargo: str, usuario: UsuarioAutenticado = Depends(get_current_user)
+    id_cargo: str, usuario: UsuarioAutenticado = Depends(get_current_staff)
 ) -> dict:
     _requiere_rol(usuario, set())
     admin = get_supabase_admin_client()
@@ -1317,7 +1469,7 @@ def _verificar_no_es_ultimo_admin(admin: Client, perfil: dict) -> None:
 
 
 @app.get("/admin/usuarios", response_model=list[UsuarioOut])
-def listar_usuarios(usuario: UsuarioAutenticado = Depends(get_current_user)) -> list[dict]:
+def listar_usuarios(usuario: UsuarioAutenticado = Depends(get_current_staff)) -> list[dict]:
     _requiere_rol(usuario, set())
     admin = get_supabase_admin_client()
     perfiles = admin.table("perfiles_especialista").select("*").order("creado_en").execute().data or []
@@ -1326,7 +1478,7 @@ def listar_usuarios(usuario: UsuarioAutenticado = Depends(get_current_user)) -> 
 
 
 @app.post("/admin/usuarios", response_model=UsuarioOut)
-def crear_usuario(datos: UsuarioCreate, usuario: UsuarioAutenticado = Depends(get_current_user)) -> dict:
+def crear_usuario(datos: UsuarioCreate, usuario: UsuarioAutenticado = Depends(get_current_staff)) -> dict:
     _requiere_rol(usuario, set())
     admin = get_supabase_admin_client()
 
@@ -1342,7 +1494,13 @@ def crear_usuario(datos: UsuarioCreate, usuario: UsuarioAutenticado = Depends(ge
     # perfiles_especialista con nombre_completo=email y rol=GESTOR (default
     # de la columna) -- se actualiza de inmediato con los valores reales.
     admin.table("perfiles_especialista").update(
-        {"nombre_completo": datos.nombre_completo, "rol": datos.rol}
+        {
+            "nombre_completo": datos.nombre_completo,
+            "rol": datos.rol,
+            # Solo tiene sentido para cuentas de portal; para el personal
+            # interno se fuerza a None aunque venga algo en el request.
+            "id_cliente": datos.id_cliente if datos.rol == "CLIENTE" else None,
+        }
     ).eq("id", id_usuario).execute()
 
     return {**_obtener_perfil_o_404(admin, id_usuario), "email": datos.email}
@@ -1350,7 +1508,7 @@ def crear_usuario(datos: UsuarioCreate, usuario: UsuarioAutenticado = Depends(ge
 
 @app.put("/admin/usuarios/{id_usuario}", response_model=UsuarioOut)
 def actualizar_usuario(
-    id_usuario: str, datos: UsuarioUpdate, usuario: UsuarioAutenticado = Depends(get_current_user)
+    id_usuario: str, datos: UsuarioUpdate, usuario: UsuarioAutenticado = Depends(get_current_staff)
 ) -> dict:
     _requiere_rol(usuario, set())
     admin = get_supabase_admin_client()
@@ -1366,7 +1524,12 @@ def actualizar_usuario(
             raise HTTPException(status_code=400, detail=f"No se pudo actualizar la contraseña: {error}") from error
 
     admin.table("perfiles_especialista").update(
-        {"nombre_completo": datos.nombre_completo, "rol": datos.rol, "activo": datos.activo}
+        {
+            "nombre_completo": datos.nombre_completo,
+            "rol": datos.rol,
+            "activo": datos.activo,
+            "id_cliente": datos.id_cliente if datos.rol == "CLIENTE" else None,
+        }
     ).eq("id", id_usuario).execute()
 
     perfil_actualizado = _obtener_perfil_o_404(admin, id_usuario)
@@ -1375,7 +1538,7 @@ def actualizar_usuario(
 
 
 @app.delete("/admin/usuarios/{id_usuario}")
-def eliminar_usuario(id_usuario: str, usuario: UsuarioAutenticado = Depends(get_current_user)) -> dict:
+def eliminar_usuario(id_usuario: str, usuario: UsuarioAutenticado = Depends(get_current_staff)) -> dict:
     _requiere_rol(usuario, set())
     admin = get_supabase_admin_client()
     perfil = _obtener_perfil_o_404(admin, id_usuario)
@@ -1386,4 +1549,79 @@ def eliminar_usuario(id_usuario: str, usuario: UsuarioAutenticado = Depends(get_
     except Exception as error:
         raise HTTPException(status_code=400, detail=f"No se pudo eliminar el usuario: {error}") from error
 
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------
+# Administracion (solo ADMIN): CRUD de clientes
+# ---------------------------------------------------------------------
+# Un "cliente" es el importador dueno de los despachos. Registrarlo aca es
+# lo que habilita el portal externo: los despachos se vinculan a una fila
+# de esta tabla, y una cuenta con rol CLIENTE se vincula al mismo id.
+
+def _obtener_cliente_o_404(admin: Client, id_cliente: str) -> dict:
+    respuesta = admin.table("clientes").select("*").eq("id", id_cliente).execute()
+    if not respuesta.data:
+        raise HTTPException(status_code=404, detail=f"No existe un cliente con id {id_cliente}.")
+    return respuesta.data[0]
+
+
+@app.get("/admin/clientes", response_model=list[ClienteOut])
+def listar_clientes(usuario: UsuarioAutenticado = Depends(get_current_staff)) -> list[dict]:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    return admin.table("clientes").select("*").order("razon_social").execute().data or []
+
+
+@app.post("/admin/clientes", response_model=ClienteOut)
+def crear_cliente(
+    datos: ClienteUpsert, usuario: UsuarioAutenticado = Depends(get_current_staff)
+) -> dict:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    try:
+        respuesta = admin.table("clientes").insert(datos.model_dump()).execute()
+    except Exception as error:
+        if "duplicate key" in str(error) or "23505" in str(error):
+            raise HTTPException(
+                status_code=400, detail=f"Ya existe un cliente con RUC '{datos.ruc}'."
+            ) from error
+        raise
+    return respuesta.data[0]
+
+
+@app.put("/admin/clientes/{id_cliente}", response_model=ClienteOut)
+def actualizar_cliente(
+    id_cliente: str, datos: ClienteUpsert, usuario: UsuarioAutenticado = Depends(get_current_staff)
+) -> dict:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    _obtener_cliente_o_404(admin, id_cliente)
+    fila = datos.model_dump()
+    fila["actualizado_en"] = _ahora_iso()
+    try:
+        respuesta = admin.table("clientes").update(fila).eq("id", id_cliente).execute()
+    except Exception as error:
+        if "duplicate key" in str(error) or "23505" in str(error):
+            raise HTTPException(
+                status_code=400, detail=f"Ya existe un cliente con RUC '{datos.ruc}'."
+            ) from error
+        raise
+    return respuesta.data[0]
+
+
+@app.delete("/admin/clientes/{id_cliente}")
+def eliminar_cliente(
+    id_cliente: str, usuario: UsuarioAutenticado = Depends(get_current_staff)
+) -> dict:
+    """Eliminar un cliente NO borra sus despachos: la FK es ON DELETE SET
+    NULL, asi que los despachos quedan con su nombre en texto libre y
+    dejan de ser visibles en el portal. Las cuentas de portal de ese
+    cliente si se eliminan en cascada (ON DELETE CASCADE sobre
+    perfiles_especialista), porque una cuenta CLIENTE sin cliente no
+    tendria nada que mostrar."""
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    _obtener_cliente_o_404(admin, id_cliente)
+    admin.table("clientes").delete().eq("id", id_cliente).execute()
     return {"status": "ok"}

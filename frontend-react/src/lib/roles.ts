@@ -47,4 +47,12 @@ export const ROL_INFO: Record<Rol, { label: string }> = {
   ADMIN: { label: "Administrador" },
   GESTOR: { label: "Gestor" },
   LIQUIDADOR: { label: "Liquidador" },
+  CLIENTE: { label: "Cliente (portal)" },
 };
+
+/** true si la cuenta es externa (portal del importador) y no parte del
+ * equipo interno. Espejo de `get_current_staff`/`get_current_cliente` en
+ * app/main.py. */
+export function esCliente(rol: Rol | null | undefined): boolean {
+  return rol === "CLIENTE";
+}

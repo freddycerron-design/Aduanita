@@ -3,6 +3,8 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { useSession } from "@/hooks/useSession";
 import { RequireAuth } from "@/components/auth/RequireAuth";
+import { RequireSurface } from "@/components/auth/RequireSurface";
+import { PortalPage } from "@/routes/PortalPage";
 import { Toaster } from "@/components/ui/sonner";
 import { LoginPage } from "@/routes/LoginPage";
 import { DashboardLayout } from "@/routes/DashboardLayout";
@@ -29,11 +31,26 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      {/* Portal del importador: superficie separada, sin la barra lateral
+          interna. Una cuenta del equipo que caiga acá se redirige a "/" y
+          viceversa (ver RequireSurface). */}
+      <Route
+        path="/portal"
+        element={
+          <RequireAuth>
+            <RequireSurface superficie="portal">
+              <PortalPage />
+            </RequireSurface>
+          </RequireAuth>
+        }
+      />
       <Route
         path="/"
         element={
           <RequireAuth>
-            <DashboardLayout />
+            <RequireSurface superficie="interna">
+              <DashboardLayout />
+            </RequireSurface>
           </RequireAuth>
         }
       >

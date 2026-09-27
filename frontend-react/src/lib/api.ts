@@ -5,6 +5,8 @@ import type {
   CalcularPreliquidacionRequest,
   CargoEspecialArancelOut,
   CargoEspecialArancelUpsert,
+  ClienteOut,
+  ClienteUpsert,
   DecisionRequest,
   DespachoCreate,
   DespachoDetalleOut,
@@ -14,6 +16,7 @@ import type {
   HistorialClasificacionOut,
   MetricasOut,
   PipelineResultOut,
+  PortalDespachoOut,
   PreliquidacionDetalleOut,
   PreliquidacionOut,
   ReglaValidacionOut,
@@ -295,6 +298,30 @@ export function actualizarUsuario(idUsuario: string, datos: UsuarioUpdate): Prom
 
 export function eliminarUsuario(idUsuario: string): Promise<{ status: string }> {
   return apiFetch<{ status: string }>(`/admin/usuarios/${idUsuario}`, { method: "DELETE" });
+}
+
+// --- clientes (admin) ---------------------------------------------------------
+
+export function listarClientes(): Promise<ClienteOut[]> {
+  return apiFetch<ClienteOut[]>("/admin/clientes");
+}
+
+export function crearCliente(datos: ClienteUpsert): Promise<ClienteOut> {
+  return apiFetch<ClienteOut>("/admin/clientes", { method: "POST", json: datos });
+}
+
+export function actualizarCliente(idCliente: string, datos: ClienteUpsert): Promise<ClienteOut> {
+  return apiFetch<ClienteOut>(`/admin/clientes/${idCliente}`, { method: "PUT", json: datos });
+}
+
+export function eliminarCliente(idCliente: string): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>(`/admin/clientes/${idCliente}`, { method: "DELETE" });
+}
+
+// --- portal del importador ---------------------------------------------------------
+
+export function listarDespachosPortal(): Promise<PortalDespachoOut[]> {
+  return apiFetch<PortalDespachoOut[]>("/portal/despachos");
 }
 
 // --- métricas de inicio ---------------------------------------------------------

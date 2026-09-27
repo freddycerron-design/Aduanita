@@ -24,9 +24,13 @@ create table public.perfiles_especialista (
     id              uuid primary key references auth.users(id) on delete cascade,
     nombre_completo text not null,
     rol             text not null default 'GESTOR'
-                        check (rol in ('GESTOR', 'LIQUIDADOR', 'ADMIN')),
+                        check (rol in ('GESTOR', 'LIQUIDADOR', 'ADMIN', 'CLIENTE')),
     activo          boolean not null default true,
-    creado_en       timestamptz not null default now()
+    creado_en       timestamptz not null default now(),
+    -- Solo para cuentas con rol CLIENTE (portal externo): a que importador
+    -- pertenecen. Null para el personal interno. La FK se agrega en la
+    -- seccion 15, cuando ya existe la tabla clientes.
+    id_cliente      uuid
 );
 
 comment on table public.perfiles_especialista is
@@ -38,7 +42,9 @@ comment on column public.perfiles_especialista.rol is
     'calcula la pre-liquidacion de tributos. '
     'ADMIN: puede realizar cualquier accion de los dos roles anteriores, '
     'ademas de administrar reglas de validacion, cargos especiales del '
-    'arancel, y usuarios.';
+    'arancel, y usuarios. '
+    'CLIENTE: cuenta EXTERNA de solo lectura (portal del importador); no es '
+    'parte del equipo interno y solo ve sus propios despachos, ver seccion 15.';
 
 -- Funcion + trigger: al crear un usuario en auth.users, crea su perfil
 -- automaticamente. El nombre completo se toma de raw_user_meta_data si
@@ -89,7 +95,12 @@ create table public.despachos (
                         )),
     fecha_creacion  timestamptz not null default now(),
     creado_por      uuid references public.perfiles_especialista(id),
-    actualizado_en  timestamptz not null default now()
+    actualizado_en  timestamptz not null default now(),
+    -- Cliente dueno del despacho (FK agregada en la seccion 15). Nullable:
+    -- los despachos previos al portal y los de clientes no registrados se
+    -- quedan solo con el texto libre de "cliente". Un despacho sin
+    -- id_cliente NO es visible para ninguna cuenta de portal.
+    id_cliente      uuid
 );
 
 create index despachos_creado_por_idx on public.despachos (creado_por);
@@ -302,29 +313,37 @@ alter table public.resultados_validacion   enable row level security;
 alter table public.historial_clasificaciones enable row level security;
 alter table public.borradores_correo       enable row level security;
 
--- Lectura: cualquier usuario autenticado puede leer todo (MVP de un solo
--- equipo interno, sin multi-tenant todavia).
+-- Lectura: acotada al PERSONAL INTERNO (GESTOR/LIQUIDADOR/ADMIN). Antes
+-- decia "cualquier autenticado", lo cual dejo de ser seguro al existir el
+-- rol CLIENTE (cuentas externas del portal): con la regla vieja, un
+-- cliente podia leer los despachos, documentos y borradores de TODOS los
+-- demas directamente contra PostgREST, saltandose la API. Ver seccion 15
+-- para los helpers es_personal_interno()/cliente_actual() y la policy
+-- propia del cliente sobre despachos.
 --
 -- Las llamadas a auth.uid()/auth.role() se envuelven en (select ...) para
 -- que Postgres las evalue una sola vez por consulta en vez de una vez por
 -- fila (recomendacion oficial de Supabase para RLS a escala).
-create policy "auth_select_perfiles" on public.perfiles_especialista
-    for select using ((select auth.role()) = 'authenticated');
+create policy "select_perfiles" on public.perfiles_especialista
+    for select using (public.es_personal_interno() or id = (select auth.uid()));
 
-create policy "auth_select_despachos" on public.despachos
-    for select using ((select auth.role()) = 'authenticated');
+create policy "select_despachos" on public.despachos
+    for select using (
+        public.es_personal_interno()
+        or (id_cliente is not null and id_cliente = public.cliente_actual())
+    );
 
-create policy "auth_select_documentos" on public.documentos_extraidos
-    for select using ((select auth.role()) = 'authenticated');
+create policy "select_documentos" on public.documentos_extraidos
+    for select using (public.es_personal_interno());
 
-create policy "auth_select_validacion" on public.resultados_validacion
-    for select using ((select auth.role()) = 'authenticated');
+create policy "select_validacion" on public.resultados_validacion
+    for select using (public.es_personal_interno());
 
-create policy "auth_select_historial" on public.historial_clasificaciones
-    for select using ((select auth.role()) = 'authenticated');
+create policy "select_historial" on public.historial_clasificaciones
+    for select using (public.es_personal_interno());
 
-create policy "auth_select_borradores" on public.borradores_correo
-    for select using ((select auth.role()) = 'authenticated');
+create policy "select_borradores" on public.borradores_correo
+    for select using (public.es_personal_interno());
 
 -- Insert en historial_clasificaciones: solo el propio usuario autenticado
 -- puede insertar una fila donde el figure como aprobado_por (evita que
@@ -355,9 +374,11 @@ insert into storage.buckets (id, name, public)
 values ('documentos-aduaneros', 'documentos-aduaneros', false)
 on conflict (id) do nothing;
 
-create policy "auth_select_storage_documentos"
+-- Solo el personal interno descarga los archivos originales: el portal
+-- del cliente expone estado y fechas, nunca los documentos.
+create policy "select_storage_documentos"
     on storage.objects for select
-    using (bucket_id = 'documentos-aduaneros' and (select auth.role()) = 'authenticated');
+    using (bucket_id = 'documentos-aduaneros' and public.es_personal_interno());
 
 
 -- ---------------------------------------------------------------------
@@ -427,8 +448,8 @@ alter table public.reglas_validacion enable row level security;
 -- de insert/update/delete para "authenticated", solo el backend
 -- (service_role, gateado por _requiere_rol(usuario, set()) = solo ADMIN)
 -- escribe aqui.
-create policy "auth_select_reglas_validacion" on public.reglas_validacion
-    for select using ((select auth.role()) = 'authenticated');
+create policy "select_reglas_validacion" on public.reglas_validacion
+    for select using (public.es_personal_interno());
 
 
 -- ---------------------------------------------------------------------
@@ -565,8 +586,8 @@ alter table public.cargos_especiales_arancel enable row level security;
 -- Mismo patron que reglas_validacion: sin policies de insert/update/delete
 -- para "authenticated", solo el backend (service_role, gateado por
 -- _requiere_rol(usuario, set()) = solo ADMIN) escribe aqui.
-create policy "auth_select_cargos_especiales_arancel" on public.cargos_especiales_arancel
-    for select using ((select auth.role()) = 'authenticated');
+create policy "select_cargos_especiales_arancel" on public.cargos_especiales_arancel
+    for select using (public.es_personal_interno());
 
 
 -- ---------------------------------------------------------------------
@@ -607,5 +628,92 @@ comment on table public.preliquidaciones is
 
 alter table public.preliquidaciones enable row level security;
 
-create policy "auth_select_preliquidaciones" on public.preliquidaciones
-    for select using ((select auth.role()) = 'authenticated');
+create policy "select_preliquidaciones" on public.preliquidaciones
+    for select using (public.es_personal_interno());
+
+
+-- ---------------------------------------------------------------------
+-- 15. clientes + portal del cliente
+-- ---------------------------------------------------------------------
+-- Habilita el portal externo: el importador entra con su propia cuenta
+-- (rol CLIENTE) y ve SOLO el estado de sus propios despachos -- nunca los
+-- hallazgos de validacion, la propuesta de clasificacion, la
+-- pre-liquidacion ni los documentos originales, que son trabajo interno.
+--
+-- Los 3 roles del equipo interno (GESTOR/LIQUIDADOR/ADMIN) no cambian:
+-- CLIENTE es una cuenta externa, no un 4to rol del equipo.
+create table public.clientes (
+    id             uuid primary key default gen_random_uuid(),
+    razon_social   text not null,
+    ruc            text unique,
+    activo         boolean not null default true,
+    creado_en      timestamptz not null default now(),
+    actualizado_en timestamptz not null default now()
+);
+
+comment on table public.clientes is
+    'Importadores a los que pertenecen los despachos. Habilita el portal del '
+    'cliente: una cuenta con rol CLIENTE se vincula a una fila de esta tabla '
+    '(perfiles_especialista.id_cliente) y solo puede ver los despachos con ese '
+    'mismo id_cliente.';
+
+-- FKs de las columnas declaradas en las secciones 1 y 2 (se agregan aca
+-- porque la tabla clientes recien existe en este punto del script).
+alter table public.despachos
+    add constraint despachos_id_cliente_fkey
+    foreign key (id_cliente) references public.clientes(id) on delete set null;
+
+alter table public.perfiles_especialista
+    add constraint perfiles_especialista_id_cliente_fkey
+    foreign key (id_cliente) references public.clientes(id) on delete cascade;
+
+create index despachos_id_cliente_idx on public.despachos (id_cliente);
+
+-- Helpers usados por las RLS policies de las secciones 8, 9, 10, 13 y 14.
+-- SECURITY DEFINER a proposito: leen perfiles_especialista desde dentro de
+-- una policy que se aplica sobre esa misma tabla -- sin esto habria
+-- recursion infinita.
+create or replace function public.es_personal_interno()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+    select coalesce(
+        (select rol from public.perfiles_especialista where id = (select auth.uid()))
+            in ('GESTOR', 'LIQUIDADOR', 'ADMIN'),
+        false
+    );
+$$;
+
+create or replace function public.cliente_actual()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+    select id_cliente from public.perfiles_especialista where id = (select auth.uid());
+$$;
+
+comment on function public.es_personal_interno is
+    'true si el usuario autenticado es del equipo interno. Usada por las RLS '
+    'policies para separar al personal de las cuentas externas de portal.';
+comment on function public.cliente_actual is
+    'id_cliente del usuario autenticado (null si es personal interno). Usada por '
+    'la policy de despachos para acotar lo que ve una cuenta de portal.';
+
+revoke execute on function public.es_personal_interno() from public, anon;
+revoke execute on function public.cliente_actual() from public, anon;
+grant execute on function public.es_personal_interno() to authenticated;
+grant execute on function public.cliente_actual() to authenticated;
+
+alter table public.clientes enable row level security;
+
+-- El personal interno administra los clientes; una cuenta de portal solo
+-- puede ver su propia ficha. Sin policies de insert/update/delete: el CRUD
+-- pasa por el backend con service_role, gateado a ADMIN por
+-- _requiere_rol(usuario, set()) en app/main.py.
+create policy "select_clientes" on public.clientes
+    for select using (public.es_personal_interno() or id = public.cliente_actual());

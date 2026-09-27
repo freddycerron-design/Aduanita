@@ -3,6 +3,7 @@ import { useForm } from "react-hook-form";
 
 import { useCrearUsuario } from "@/hooks/useCrearUsuario";
 import { useActualizarUsuario } from "@/hooks/useActualizarUsuario";
+import { useClientes } from "@/hooks/useClientes";
 import { ROL_INFO } from "@/lib/roles";
 import type { Rol, UsuarioOut } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-const ROLES: Rol[] = ["GESTOR", "LIQUIDADOR", "ADMIN"];
+const ROLES: Rol[] = ["GESTOR", "LIQUIDADOR", "ADMIN", "CLIENTE"];
+
+/** Valor centinela del select: "sin cliente vinculado". Radix Select no
+ * acepta un <SelectItem value=""> (string vacio), asi que hace falta un
+ * valor concreto que se traduce a null al enviar. */
+const SIN_CLIENTE = "__sin_cliente__";
 
 interface FormValues {
   email: string;
@@ -26,6 +32,7 @@ interface FormValues {
   nombre_completo: string;
   rol: Rol;
   activo: boolean;
+  id_cliente: string;
 }
 
 function valoresIniciales(usuario: UsuarioOut | null): FormValues {
@@ -35,6 +42,7 @@ function valoresIniciales(usuario: UsuarioOut | null): FormValues {
     nombre_completo: usuario?.nombre_completo ?? "",
     rol: usuario?.rol ?? "GESTOR",
     activo: usuario?.activo ?? true,
+    id_cliente: usuario?.id_cliente ?? SIN_CLIENTE,
   };
 }
 
@@ -56,6 +64,7 @@ export interface UsuarioFormProps {
 export function UsuarioForm({ open, onOpenChange, usuario }: UsuarioFormProps) {
   const crear = useCrearUsuario();
   const actualizar = useActualizarUsuario();
+  const { data: clientes } = useClientes();
   const guardando = crear.isPending || actualizar.isPending;
 
   const { register, handleSubmit, watch, setValue, reset } = useForm<FormValues>({
@@ -67,6 +76,10 @@ export function UsuarioForm({ open, onOpenChange, usuario }: UsuarioFormProps) {
   }, [usuario, reset]);
 
   function onSubmit(v: FormValues) {
+    // El backend ignora id_cliente para roles internos, pero se manda
+    // limpio igual para que el request diga lo que de verdad significa.
+    const idCliente = v.rol === "CLIENTE" && v.id_cliente !== SIN_CLIENTE ? v.id_cliente : null;
+
     if (usuario) {
       actualizar.mutate(
         {
@@ -76,13 +89,20 @@ export function UsuarioForm({ open, onOpenChange, usuario }: UsuarioFormProps) {
             rol: v.rol,
             activo: v.activo,
             password: v.password.trim() || undefined,
+            id_cliente: idCliente,
           },
         },
         { onSuccess: () => onOpenChange(false) },
       );
     } else {
       crear.mutate(
-        { email: v.email.trim(), password: v.password, nombre_completo: v.nombre_completo, rol: v.rol },
+        {
+          email: v.email.trim(),
+          password: v.password,
+          nombre_completo: v.nombre_completo,
+          rol: v.rol,
+          id_cliente: idCliente,
+        },
         { onSuccess: () => onOpenChange(false) },
       );
     }
@@ -141,6 +161,31 @@ export function UsuarioForm({ open, onOpenChange, usuario }: UsuarioFormProps) {
               </SelectContent>
             </Select>
           </div>
+
+          {watch("rol") === "CLIENTE" && (
+            <div className="flex flex-col gap-2">
+              <Label>Importador vinculado</Label>
+              <Select
+                value={watch("id_cliente")}
+                onValueChange={(v) => setValue("id_cliente", v)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={SIN_CLIENTE}>Sin vincular</SelectItem>
+                  {(clientes ?? []).map((cliente) => (
+                    <SelectItem key={cliente.id} value={cliente.id}>
+                      {cliente.razon_social}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-texto-secundario">
+                Una cuenta de portal sin importador vinculado no puede ver ningún despacho.
+              </p>
+            </div>
+          )}
 
           {usuario && (
             <div className="flex items-center gap-2">
