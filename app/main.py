@@ -367,12 +367,18 @@ class PropuestaClasificacionOut(PropuestaClasificacion):
     pass
 
 
+CanalEnvio = Literal["CORREO", "WHATSAPP", "AMBOS"]
+
+
 class BorradorCorreoOut(BaseModel):
     id: str
     tipo: str
     asunto: str
     cuerpo: str
     cuerpo_editado: str | None = None
+    # Registro de intencion, nada mas -- no hay integracion de correo ni
+    # de WhatsApp que de verdad envie algo (ver comentario en el schema).
+    canal_envio: CanalEnvio = "CORREO"
 
 
 class DespachoDetalleOut(BaseModel):
@@ -393,7 +399,12 @@ class DespachoDetalleOut(BaseModel):
 
 
 class ActualizarBorradorRequest(BaseModel):
-    cuerpo_editado: str
+    """Al menos uno de los dos debe venir -- el endpoint solo actualiza
+    los campos presentes (editar el texto y elegir el canal son dos
+    acciones independientes en la UI, ver ComunicacionesTab)."""
+
+    cuerpo_editado: str | None = None
+    canal_envio: CanalEnvio | None = None
 
 
 class DecisionRequest(BaseModel):
@@ -1502,8 +1513,14 @@ def editar_borrador(
     datos: ActualizarBorradorRequest,
     usuario: UsuarioAutenticado = Depends(get_current_staff),
 ) -> dict:
+    if datos.cuerpo_editado is None and datos.canal_envio is None:
+        raise HTTPException(
+            status_code=400, detail="Debes enviar cuerpo_editado, canal_envio, o ambos."
+        )
     cliente_usuario = get_supabase_user_client(usuario.access_token)
-    actualizado = actualizar_borrador_editado(cliente_usuario, id_borrador, datos.cuerpo_editado, usuario.id)
+    actualizado = actualizar_borrador_editado(
+        cliente_usuario, id_borrador, usuario.id, datos.cuerpo_editado, datos.canal_envio
+    )
     return actualizado
 
 

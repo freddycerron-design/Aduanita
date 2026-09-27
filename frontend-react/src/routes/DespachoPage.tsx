@@ -9,17 +9,19 @@ import { ExploradorTab } from "@/routes/tabs/ExploradorTab";
 import { RevisionTab } from "@/routes/tabs/RevisionTab";
 import { ClasificacionTab } from "@/routes/tabs/ClasificacionTab";
 import { PreliquidacionTab } from "@/routes/tabs/PreliquidacionTab";
-import { CorreoTab } from "@/routes/tabs/CorreoTab";
+import { ComunicacionesTab } from "@/routes/tabs/ComunicacionesTab";
 
-type TabValue = "explorador" | "revision" | "clasificacion" | "preliquidacion" | "correo";
-const TABS_VALIDOS: TabValue[] = ["explorador", "revision", "clasificacion", "preliquidacion", "correo"];
+type TabValue = "explorador" | "revision" | "clasificacion" | "preliquidacion" | "comunicaciones";
+const TABS_VALIDOS: TabValue[] = ["explorador", "revision", "clasificacion", "preliquidacion", "comunicaciones"];
 
 /**
  * Shell de la sección Validador: el Explorador (crear/buscar/listar
  * despachos, ver `ExploradorTab`) es la primera pestaña de la MISMA tira
- * que Revisión/Clasificación/Pre-liquidación/Correo -- ya no un panel
- * lateral aparte. No hay un despacho "activo" hasta que se elige uno ahí
- * (o se crea uno nuevo), momento en el que la URL pasa a `/despachos/:id`.
+ * que Revisión/Clasificación/Pre-liquidación/Comunicaciones (antes
+ * "Correo": ahora el borrador puede marcarse para enviarse por correo,
+ * WhatsApp, o ambos, ver `ComunicacionesTab`) -- ya no un panel lateral
+ * aparte. No hay un despacho "activo" hasta que se elige uno ahí (o se
+ * crea uno nuevo), momento en el que la URL pasa a `/despachos/:id`.
  *
  * Sin id (ruta `/despachos`): el Explorador es la única pestaña
  * habilitada -- las demás no tienen sentido sin un despacho elegido, así
@@ -93,8 +95,8 @@ export function DespachoPage() {
             <TabsTrigger value="preliquidacion" disabled={!detalle}>
               Pre liquidación
             </TabsTrigger>
-            <TabsTrigger value="correo" disabled={!detalle}>
-              Correo
+            <TabsTrigger value="comunicaciones" disabled={!detalle}>
+              Comunicaciones
             </TabsTrigger>
           </TabsList>
 
@@ -129,8 +131,8 @@ export function DespachoPage() {
                 <PreliquidacionTab idDespacho={detalle.despacho.id} documentos={detalle.documentos} />
               </TabsContent>
 
-              <TabsContent value="correo">
-                <CorreoTab borrador={detalle.borrador} />
+              <TabsContent value="comunicaciones">
+                <ComunicacionesTab borrador={detalle.borrador} />
               </TabsContent>
             </>
           )}

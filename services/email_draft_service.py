@@ -156,14 +156,22 @@ def guardar_borrador(supabase: Client, id_despacho: str, borrador: BorradorCorre
     return respuesta.data[0]
 
 
-def actualizar_borrador_editado(supabase_usuario: Client, id_borrador: str, cuerpo_editado: str, editado_por: str) -> dict:
-    """Guarda la version editada por el especialista. `supabase_usuario`
-    debe ser un cliente autenticado con el JWT del usuario para que la
-    politica RLS valide auth.uid() = editado_por."""
-    respuesta = (
-        supabase_usuario.table("borradores_correo")
-        .update({"cuerpo_editado": cuerpo_editado, "editado_por": editado_por})
-        .eq("id", id_borrador)
-        .execute()
-    )
+def actualizar_borrador_editado(
+    supabase_usuario: Client,
+    id_borrador: str,
+    editado_por: str,
+    cuerpo_editado: str | None = None,
+    canal_envio: str | None = None,
+) -> dict:
+    """Guarda la version editada por el especialista y/o el canal por el
+    que planea enviarlo -- solo se actualizan los campos presentes (el
+    endpoint exige al menos uno de los dos, ver app/main.py::editar_borrador).
+    `supabase_usuario` debe ser un cliente autenticado con el JWT del
+    usuario para que la politica RLS valide auth.uid() = editado_por."""
+    cambios: dict = {"editado_por": editado_por}
+    if cuerpo_editado is not None:
+        cambios["cuerpo_editado"] = cuerpo_editado
+    if canal_envio is not None:
+        cambios["canal_envio"] = canal_envio
+    respuesta = supabase_usuario.table("borradores_correo").update(cambios).eq("id", id_borrador).execute()
     return respuesta.data[0]

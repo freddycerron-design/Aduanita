@@ -129,7 +129,12 @@ export interface PropuestaClasificacionOut {
   sustento_legal_rgi: string;
 }
 
-// --- borrador de correo ---------------------------------------------------------
+// --- borrador de comunicación ---------------------------------------------------------
+
+/** Registro de intención, nada más: no hay integración de correo ni de
+ * WhatsApp que de verdad envíe algo -- sigue siendo un borrador que el
+ * especialista copia a mano. */
+export type CanalEnvio = "CORREO" | "WHATSAPP" | "AMBOS";
 
 export interface BorradorCorreoOut {
   id: string;
@@ -137,10 +142,15 @@ export interface BorradorCorreoOut {
   asunto: string;
   cuerpo: string;
   cuerpo_editado: string | null;
+  canal_envio: CanalEnvio;
 }
 
+/** Al menos uno de los dos debe venir -- editar el texto y elegir el
+ * canal son dos acciones independientes en la UI (ver
+ * ComunicacionesTab), y el backend solo actualiza los campos presentes. */
 export interface ActualizarBorradorRequest {
-  cuerpo_editado: string;
+  cuerpo_editado?: string;
+  canal_envio?: CanalEnvio;
 }
 
 // --- decision del liquidador ---------------------------------------------------------

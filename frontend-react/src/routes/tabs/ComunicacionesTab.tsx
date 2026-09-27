@@ -1,20 +1,22 @@
 import { EmailDraftEditor } from "@/components/email/EmailDraftEditor";
 import type { BorradorCorreoOut } from "@/lib/types";
 
-export interface CorreoTabProps {
+export interface ComunicacionesTabProps {
   borrador: BorradorCorreoOut | null;
 }
 
 /**
- * Pestaña 3: borrador de correo generado al enviar el despacho a
- * clasificación. Ver `tab_correo` en el dashboard.py viejo para el
- * comportamiento de referencia.
+ * Pestaña 5 (antes "Correo"): borrador generado al enviar el despacho a
+ * clasificación, con el canal por el que el especialista piensa
+ * enviarlo (correo, WhatsApp, o ambos -- ver `EmailDraftEditor`). Sigue
+ * siendo solo un borrador: nada se envía automáticamente por ningún
+ * canal, el especialista lo copia a mano.
  */
-export function CorreoTab({ borrador }: CorreoTabProps) {
+export function ComunicacionesTab({ borrador }: ComunicacionesTabProps) {
   if (!borrador) {
     return (
       <div className="rounded-2xl border border-border bg-card p-4 text-sm text-texto-secundario">
-        Aún no se ha generado un borrador de correo (se genera al enviar a clasificación).
+        Aún no se ha generado un borrador de comunicación (se genera al enviar a clasificación).
       </div>
     );
   }

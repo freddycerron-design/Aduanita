@@ -255,7 +255,10 @@ create index historial_clasificaciones_aprobado_por_idx on public.historial_clas
 -- ---------------------------------------------------------------------
 -- Borrador de correo generado por services/email_draft_service.py. No se
 -- envia automaticamente: el especialista lo copia o edita desde el
--- dashboard (decision confirmada con el usuario).
+-- dashboard (decision confirmada con el usuario). `canal_envio` es solo
+-- un registro de por donde PLANEA enviarlo (pestaña "Comunicaciones") --
+-- no hay integracion real de correo ni de WhatsApp, sigue sin enviarse
+-- nada automaticamente.
 create table public.borradores_correo (
     id              uuid primary key default gen_random_uuid(),
     id_despacho     uuid not null references public.despachos(id) on delete cascade,
@@ -264,11 +267,18 @@ create table public.borradores_correo (
     cuerpo          text not null,
     generado_en     timestamptz not null default now(),
     editado_por     uuid references public.perfiles_especialista(id),
-    cuerpo_editado  text
+    cuerpo_editado  text,
+    canal_envio     text not null default 'CORREO'
+                        check (canal_envio in ('CORREO', 'WHATSAPP', 'AMBOS'))
 );
 
 create index borradores_correo_id_despacho_idx on public.borradores_correo (id_despacho);
 create index borradores_correo_editado_por_idx on public.borradores_correo (editado_por);
+
+comment on column public.borradores_correo.canal_envio is
+    'Por que canal planea enviarlo el especialista: CORREO, WHATSAPP o AMBOS. '
+    'No dispara ningun envio real -- el sistema no tiene integracion de correo '
+    'ni de WhatsApp, sigue siendo un borrador que se copia a mano.';
 
 
 -- ---------------------------------------------------------------------

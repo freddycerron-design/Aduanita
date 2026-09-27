@@ -5,10 +5,13 @@ import { queryKeys } from "@/lib/queryKeys";
 import type { ActualizarBorradorRequest } from "@/lib/types";
 
 /**
- * Guarda la edicion del cuerpo de un borrador de correo (PATCH
- * /borradores/{id}).
+ * Guarda la edicion del cuerpo y/o el canal de envio de un borrador de
+ * comunicacion (PATCH /borradores/{id}) -- ambos campos son opcionales
+ * en `ActualizarBorradorRequest`, asi que este mismo hook sirve tanto
+ * para el boton "Guardar edicion" (solo cuerpo_editado) como para el
+ * selector de canal (solo canal_envio, se guarda solo al cambiar).
  *
- * Nota: `CorreoTabProps` (fijado por el orquestador del despacho,
+ * Nota: `ComunicacionesTabProps` (fijado por el orquestador del despacho,
  * `DespachoPage.tsx`) solo expone `borrador`, no `idDespacho`, asi que no
  * podemos invalidar `queryKeys.despachos.detail(idDespacho)` puntualmente
  * como hace `useRegistrarDecision`. En su lugar invalidamos
