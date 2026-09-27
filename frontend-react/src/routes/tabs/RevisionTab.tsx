@@ -180,8 +180,9 @@ export function RevisionTab({
             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
             <p>
               Estos datos los extrajo una inteligencia artificial y puede haberse equivocado. Revísalos con
-              cuidado antes de usarlos en una declaración, en contabilidad o en cualquier otro trámite aduanero
-              -- Aduafy no se hace responsable por errores en los documentos que generes con esta información.
+              cuidado antes de usarlos en cualquier trámite aduanero. Aduafy no se hace responsable por los
+              errores en los documentos que se generen con esta información ni por las consecuencias que
+              puedan ocasionarse.
             </p>
           </div>
         )}
