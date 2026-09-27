@@ -828,7 +828,7 @@ def subir_documento(
     usar (texto de PDF vs. Gemini Vision) se toma recien en ese paso, en
     `services.pdf_processor.procesar_documento`.
 
-    El tipo real del archivo (PDF/JPG/PNG/WEBP) se detecta por su firma
+    El tipo real del archivo (PDF/JPG/PNG/WEBP/HEIC) se detecta por su firma
     binaria, no por la extension del nombre ni el Content-Type del
     navegador -- ver `pdf_processor.detectar_tipo_contenido`."""
     admin = get_supabase_admin_client()

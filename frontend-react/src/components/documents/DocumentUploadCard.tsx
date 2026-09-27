@@ -20,7 +20,8 @@ export interface DocumentUploadCardProps {
 
 /**
  * Tarjeta de carga para un tipo de documento. Acepta tanto PDF como fotos
- * (JPG/PNG/WEBP) del documento fisico -- el backend detecta el tipo real
+ * (JPG/PNG/WEBP/HEIC -- HEIC es el formato por defecto de la camara del
+ * iPhone) del documento fisico -- el backend detecta el tipo real
  * del archivo por su contenido y elige la mejor estrategia de extraccion,
  * asi que aqui no hace falta distinguirlos. Subir es inmediato al elegir
  * el archivo (no hay boton "Confirmar"): el input nativo dispara
@@ -87,7 +88,7 @@ export function DocumentUploadCard({ idDespacho, tipo, documento, disabled }: Do
         <input
           ref={inputRef}
           type="file"
-          accept="application/pdf,image/jpeg,image/png,image/webp"
+          accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
           className="hidden"
           onChange={manejarSeleccion}
         />

@@ -1,7 +1,7 @@
 """
 Extraccion de datos estructurados desde los tipos de documentos de un
 despacho (FACTURA, SEGURO, SWIFT_BANCARIO, BL, PACKING_LIST). Acepta
-tanto PDF como imagenes (JPG/PNG/WEBP) -- es comun que un especialista
+tanto PDF como imagenes (JPG/PNG/WEBP/HEIC) -- es comun que un especialista
 solo tenga una foto del documento fisico, no un PDF.
 
 El tipo real del archivo se detecta por su firma binaria ("magic bytes"),
@@ -14,7 +14,7 @@ estrategia de extraccion:
    Si esa capa de texto es nula o de mala calidad (tipico de un PDF
    escaneado), se renderizan las paginas como imagenes y se usa Gemini
    Vision sobre ellas en su lugar.
-2. **Imagen (JPG/PNG/WEBP)**: no existe una capa de texto que extraer ni
+2. **Imagen (JPG/PNG/WEBP/HEIC)**: no existe una capa de texto que extraer ni
    paginas que renderizar -- se va directo a Gemini Vision sobre el
    archivo tal cual fue subido.
 
@@ -55,7 +55,7 @@ class ExtraccionFallidaError(Exception):
 
 class TipoArchivoNoSoportadoError(Exception):
     """Se lanza cuando el archivo subido no es un PDF ni una imagen
-    reconocible (JPG/PNG/WEBP) segun su firma binaria."""
+    reconocible (JPG/PNG/WEBP/HEIC) segun su firma binaria."""
 
 
 # Firmas binarias ("magic bytes") de los formatos soportados. Se comparan
@@ -69,11 +69,22 @@ _FIRMA_PNG = b"\x89PNG\r\n\x1a\n"
 _FIRMA_RIFF = b"RIFF"
 _FIRMA_WEBP = b"WEBP"
 
+# HEIC (el formato por defecto de la camara del iPhone) no tiene una firma
+# al inicio del archivo como los demas: es un contenedor ISO-BMFF, donde
+# los bytes 4-8 son la caja "ftyp" y los 8-12 la "marca" (brand) concreta.
+# Se listan las marcas de la familia HEIF de imagen; "avif" queda afuera a
+# proposito (es otro codec, no lo produce la camara del iPhone).
+_FIRMA_FTYP = b"ftyp"
+_MARCAS_HEIC = frozenset(
+    {b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"hevm", b"hevs", b"mif1", b"msf1"}
+)
+
 EXTENSION_POR_MIME: dict[str, str] = {
     "application/pdf": "pdf",
     "image/jpeg": "jpg",
     "image/png": "png",
     "image/webp": "webp",
+    "image/heic": "heic",
 }
 
 
@@ -90,8 +101,10 @@ def detectar_tipo_contenido(contenido: bytes) -> str:
         return "image/png"
     if contenido.startswith(_FIRMA_RIFF) and contenido[8:12] == _FIRMA_WEBP:
         return "image/webp"
+    if contenido[4:8] == _FIRMA_FTYP and contenido[8:12] in _MARCAS_HEIC:
+        return "image/heic"
     raise TipoArchivoNoSoportadoError(
-        "El archivo no es un PDF ni una imagen reconocible (JPG/PNG/WEBP)."
+        "El archivo no es un PDF ni una imagen reconocible (JPG/PNG/WEBP/HEIC)."
     )
 
 
@@ -337,7 +350,7 @@ def procesar_documento(contenido: bytes, tipo_documento: TipoDocumento) -> tuple
     - PDF: intenta el camino de texto (PyMuPDF + Gemini texto) y cae a
       Gemini Vision sobre las paginas renderizadas si el texto es nulo o
       de mala calidad (PDF escaneado).
-    - Imagen (JPG/PNG/WEBP): va directo a Gemini Vision sobre el archivo
+    - Imagen (JPG/PNG/WEBP/HEIC): va directo a Gemini Vision sobre el archivo
       tal cual, no hay capa de texto ni paginas que renderizar.
 
     metodo_extraccion es 'PYMUPDF' si se pudo estructurar a partir del
@@ -374,7 +387,7 @@ def procesar_documento(contenido: bytes, tipo_documento: TipoDocumento) -> tuple
                 f"No fue posible extraer un {tipo_documento} valido del PDF: {error}"
             ) from error
 
-    # Ya es una imagen (JPG/PNG/WEBP): no hay capa de texto que intentar
+    # Ya es una imagen (JPG/PNG/WEBP/HEIC): no hay capa de texto que intentar
     # primero, se estructura directo con Gemini Vision.
     try:
         datos = extraer_con_gemini_vision([(contenido, mime)], tipo_documento)
