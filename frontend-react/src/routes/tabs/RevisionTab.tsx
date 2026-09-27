@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -21,6 +21,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { DocumentUploadCard } from "@/components/documents/DocumentUploadCard";
 import { DocumentViewer } from "@/components/documents/DocumentViewer";
 import { LedgerRow, SEVERIDAD_INFO } from "@/components/validations/LedgerRow";
+import { ProcesamientoModal } from "@/components/despacho/ProcesamientoModal";
+import type { PasoProcesamiento } from "@/components/despacho/ProcesamientoModal";
 
 export interface RevisionTabProps {
   idDespacho: string;
@@ -47,6 +49,8 @@ const TODAS_SEVERIDADES: Severidad[] = ["ALTA", "MEDIA", "NINGUNA"];
 /** Orden de criticidad para la lista de hallazgos: ALTA primero, luego
  * MEDIA, luego NINGUNA. */
 const ORDEN_SEVERIDAD: Record<Severidad, number> = { ALTA: 0, MEDIA: 1, NINGUNA: 2 };
+
+const esperar = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /** Clases literales (no interpoladas) para que el escaner de Tailwind las
  * genere -- estilo de cada chip de filtro cuando esta activo, un color por
@@ -81,6 +85,19 @@ export function RevisionTab({
   // espacio visible para el visor de documentos sin necesidad de scrollear.
   const [filtroSeveridad, setFiltroSeveridad] = useState<Severidad[]>(TODAS_SEVERIDADES);
 
+  // Estado del modal de progreso de "Extracción y validación" -- ver
+  // `ProcesamientoModal`. El backend resuelve todo en una sola llamada
+  // (no reporta avance real paso a paso), así que acá se simula una
+  // progresión plausible mientras esa llamada sigue en vuelo; el único
+  // paso que refleja un hecho real es "finalizado", recien al resolver
+  // la promesa con éxito.
+  const [modalAbierto, setModalAbierto] = useState(false);
+  const [pasoModal, setPasoModal] = useState<PasoProcesamiento>("cargando");
+  const [segundosModal, setSegundosModal] = useState(0);
+  const [errorModal, setErrorModal] = useState<string | null>(null);
+  const [tiposEnProceso, setTiposEnProceso] = useState<TipoDocumento[]>([]);
+  const idIntervaloRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const minimosOk = DOCUMENTOS_MINIMOS.every((tipo) => documentos.some((d) => d.tipo_documento === tipo));
   // Independiente de que la extraccion se haya disparado recien ahora o
   // vengas a revisar un despacho ya procesado -- el aviso tiene sentido
@@ -89,7 +106,11 @@ export function RevisionTab({
   const hayDatosExtraidos = documentos.some((d) => d.procesado);
   const puedeProcesar = puedeEnviarAClasificacion(perfil?.rol);
   const esEstadoRevision = estadoDespacho === "REVISION_DOC";
-  const ocupado = procesar.isPending || enviar.isPending;
+  // Incluye modalAbierto (no solo procesar.isPending) porque el modal
+  // sigue mostrando pasos simulados un rato despues de que la llamada
+  // real ya resolvio -- el overlay ya bloquea los clicks, esto solo
+  // mantiene el estado logico coherente con lo que se ve en pantalla.
+  const ocupado = procesar.isPending || enviar.isPending || modalAbierto;
   const validacionesFiltradas = validaciones
     .filter((v) => filtroSeveridad.includes(v.severidad))
     .sort((a, b) => ORDEN_SEVERIDAD[a.severidad] - ORDEN_SEVERIDAD[b.severidad]);
@@ -100,13 +121,57 @@ export function RevisionTab({
     );
   }
 
+  function detenerRelojModal() {
+    if (idIntervaloRef.current !== null) {
+      clearInterval(idIntervaloRef.current);
+      idIntervaloRef.current = null;
+    }
+  }
+
   async function manejarProcesar() {
+    const pendientes = TIPOS_DOCUMENTO.filter((tipo) => {
+      const documento = documentos.find((d) => d.tipo_documento === tipo);
+      return documento && !documento.procesado;
+    });
+
+    setErrorModal(null);
+    setPasoModal("cargando");
+    setSegundosModal(0);
+    setTiposEnProceso(pendientes);
+    setModalAbierto(true);
+
+    const inicio = Date.now();
+    idIntervaloRef.current = setInterval(() => {
+      setSegundosModal(Math.floor((Date.now() - inicio) / 1000));
+    }, 1000);
+    const avanceAExtrayendo = setTimeout(() => setPasoModal("extrayendo"), 1200);
+
     try {
       await procesar.mutateAsync();
+      clearTimeout(avanceAExtrayendo);
+      detenerRelojModal();
+      // "validando" y "finalizado" son ya trabajo hecho (el pipeline
+      // completo, extraccion+validacion+clasificacion+borrador, ya
+      // resolvio con exito) -- se muestran brevemente para que la
+      // progresion no salte de golpe de "extrayendo" al cierre.
+      setPasoModal("validando");
+      await esperar(600);
+      setPasoModal("finalizado");
+      await esperar(900);
+      setModalAbierto(false);
       onProcesado();
-    } catch {
-      // El hook ya notifico el error via toast; no hay nada mas que hacer aqui.
+    } catch (error) {
+      clearTimeout(avanceAExtrayendo);
+      detenerRelojModal();
+      setErrorModal(error instanceof Error ? error.message : "No se pudo procesar el despacho.");
+      // El hook ya notifico el error via toast; el modal se queda abierto
+      // mostrando el mismo mensaje hasta que el usuario lo cierre.
     }
+  }
+
+  function cerrarModalError() {
+    setErrorModal(null);
+    setModalAbierto(false);
   }
 
   async function manejarEnviar() {
@@ -120,6 +185,15 @@ export function RevisionTab({
 
   return (
     <div className="flex flex-col gap-6">
+      <ProcesamientoModal
+        abierto={modalAbierto}
+        paso={pasoModal}
+        segundosTranscurridos={segundosModal}
+        tiposEnProceso={tiposEnProceso}
+        mensajeError={errorModal}
+        onCerrar={cerrarModalError}
+      />
+
       <section className="flex flex-col gap-3">
         <div>
           <h2 className="text-sm font-semibold text-texto">Documentos</h2>
@@ -154,7 +228,7 @@ export function RevisionTab({
             <div className="flex flex-wrap items-center gap-3">
               <Button type="button" onClick={manejarProcesar} disabled={!minimosOk || ocupado}>
                 {procesar.isPending && <Loader2 className="animate-spin" />}
-                {procesar.isPending ? "Extrayendo datos, validando y clasificando..." : "Extracción y validación"}
+                {procesar.isPending ? "Procesando..." : "Extracción y validación"}
               </Button>
               <Button
                 type="button"

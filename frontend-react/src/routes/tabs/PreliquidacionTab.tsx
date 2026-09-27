@@ -96,7 +96,7 @@ export function PreliquidacionTab({ idDespacho, documentos }: PreliquidacionTabP
   if (!data?.subpartida_vigente) {
     return (
       <p className="rounded-xl border border-border bg-surface p-4 text-sm text-texto-secundario">
-        Aún no hay una subpartida determinada. Completa la pestaña Clasificación primero.
+        Aún no hay una subpartida determinada. Completa la pestaña Pre Clasificación primero.
       </p>
     );
   }

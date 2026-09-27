@@ -22,7 +22,7 @@ export function useProcesarInformacion(idDespacho: string) {
     mutationFn: () => procesarInformacion(idDespacho),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.despachos.detail(idDespacho) });
-      toast.success("Procesamiento completo. Revisa la propuesta en la pestaña Clasificación.");
+      toast.success("Procesamiento completo. Revisa la propuesta en la pestaña Pre Clasificación.");
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "No se pudo procesar el despacho.");
