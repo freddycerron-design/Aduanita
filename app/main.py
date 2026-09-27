@@ -254,10 +254,14 @@ class DespachoCreate(BaseModel):
     # Libre, opcional -- identifica de un vistazo que trae el despacho en
     # la grilla del Explorador antes de que haya documentos procesados.
     descripcion: str | None = None
-    # Opcional: vincula el despacho a un cliente registrado, lo que lo hace
-    # visible en el portal de ese importador. Sin esto el despacho existe
-    # igual, pero solo con el nombre en texto libre y sin portal.
+    # Opcional: vincula el despacho a un importador registrado, lo que lo
+    # hace visible en su portal. Sin esto el despacho existe igual, pero
+    # solo con el nombre en texto libre y sin portal.
     id_cliente: str | None = None
+    # Gestor asignado a trabajar el despacho. Opcional a nivel API (si no
+    # llega, se asigna a quien lo crea) pero el formulario lo exige
+    # siempre -- ver comentario en la columna, database/schema.sql seccion 2.
+    id_gestor: str | None = None
 
 
 class DespachoOut(BaseModel):
@@ -557,9 +561,30 @@ class UsuarioUpdate(BaseModel):
     password: str | None = None
 
 
+TipoPersona = Literal["NATURAL", "JURIDICA"]
+TipoDocumentoIdentidad = Literal["DNI", "RUC"]
+
+
 class ClienteUpsert(BaseModel):
+    """Datos del mantenimiento de Importadores. El nombre interno del
+    modelo/tabla sigue siendo "cliente" (no se renombra para no romper
+    las FKs/RLS ya en produccion) -- "Importador" es como se llama en
+    toda la interfaz."""
+
     razon_social: str
-    ruc: str | None = None
+    # Codigo interno opcional para identificar al importador (no es el id uuid).
+    codigo: str | None = None
+    tipo_persona: TipoPersona
+    tipo_documento: TipoDocumentoIdentidad
+    numero_documento: str
+    # Calle y numero en un solo campo (ej. "Av. Larco 123").
+    direccion_calle: str | None = None
+    distrito: str | None = None
+    departamento: str | None = None
+    pais: str | None = None
+    nombre_contacto: str | None = None
+    telefono_contacto: str | None = None
+    email_contacto: str | None = None
     activo: bool = True
 
 
@@ -968,7 +993,12 @@ def crear_despacho(datos: DespachoCreate, usuario: UsuarioAutenticado = Depends(
         "numero_despacho": datos.numero_despacho,
         "cliente": datos.cliente,
         "descripcion": datos.descripcion,
+        # creado_por es auditoria pura y siempre es quien hace el POST,
+        # nunca lo que venga en el body. id_gestor si puede diferir --
+        # por defecto es el creador, pero el formulario deja elegir a
+        # otro miembro del equipo.
         "creado_por": usuario.id,
+        "id_gestor": datos.id_gestor or usuario.id,
         "id_cliente": datos.id_cliente,
     }
     respuesta = admin.table("despachos").insert(fila).execute()
@@ -999,8 +1029,8 @@ def listar_despachos(
     # aceptar solo el ultimo valor.
     estados: list[str] | None = Query(default=None),
     clientes: list[str] | None = Query(default=None),
-    # Filtra por el ID del gestor (creado_por), no por su nombre -- dos
-    # personas podrian compartir nombre_completo, el ID nunca se repite.
+    # Filtra por el ID del gestor asignado (id_gestor), no por su nombre --
+    # dos personas podrian compartir nombre_completo, el ID nunca se repite.
     gestores: list[str] | None = Query(default=None),
     orden_campo: str = "fecha_creacion",
     orden_direccion: str = "desc",
@@ -1011,9 +1041,10 @@ def listar_despachos(
     en numero_despacho, cliente o descripcion a la vez; `estados`/
     `clientes`/`gestores` filtran por coincidencia EXACTA contra una lista
     de valores elegidos en el header de esas columnas (checkbox, no texto
-    libre). El nombre del gestor viaja embebido via el FK `creado_por`
-    (PostgREST resuelve el join), asi que la grilla no necesita una
-    consulta por fila para mostrarlo.
+    libre). El nombre del gestor ASIGNADO (id_gestor, no creado_por --
+    quien crea el despacho y quien lo trabaja pueden ser personas
+    distintas) viaja embebido via ese FK (PostgREST resuelve el join),
+    asi que la grilla no necesita una consulta por fila para mostrarlo.
 
     `limite` tope en 500 (no 100): la vista "agrupar por cliente/estado"
     (frontend) agrupa del lado del cliente sobre TODO lo que haya
@@ -1035,7 +1066,7 @@ def listar_despachos(
 
     consulta = (
         admin.table("despachos")
-        .select("*, gestor:perfiles_especialista!creado_por(nombre_completo)", count="exact")
+        .select("*, gestor:perfiles_especialista!id_gestor(nombre_completo)", count="exact")
         .order(orden_campo, desc=(orden_direccion == "desc"))
     )
     if estados:
@@ -1043,7 +1074,7 @@ def listar_despachos(
     if clientes:
         consulta = consulta.in_("cliente", clientes)
     if gestores:
-        consulta = consulta.in_("creado_por", gestores)
+        consulta = consulta.in_("id_gestor", gestores)
     if busqueda and busqueda.strip():
         termino = _escapar_valor_or(busqueda.strip())
         consulta = consulta.or_(
@@ -1094,23 +1125,24 @@ def listar_clientes_distintos_de_despachos(
 def listar_gestores_distintos_de_despachos(
     usuario: UsuarioAutenticado = Depends(get_current_staff),
 ) -> list[dict]:
-    """Gestores (perfiles_especialista) que crearon al menos un despacho,
-    para poblar el filtro "estilo Excel" de la columna Gestor.
+    """Gestores (perfiles_especialista) ASIGNADOS a al menos un despacho
+    (id_gestor, no creado_por), para poblar el filtro "estilo Excel" de
+    la columna Gestor -- solo lista a quien de verdad aparece en la
+    grilla, no a todo el staff (para eso ver gestores-asignables).
 
-    A diferencia de clientes-distintos, el filtro real (`gestores=` en
-    `GET /despachos`) es por ID, no por nombre: dos cuentas distintas
-    podrian compartir nombre_completo, y el ID nunca se repite. Debe
-    registrarse ANTES de `GET /despachos/{id_despacho}` por el mismo
-    motivo que clientes-distintos (mismo prefijo, dos segmentos)."""
+    El filtro real (`gestores=` en `GET /despachos`) es por ID, no por
+    nombre: dos cuentas distintas podrian compartir nombre_completo, y el
+    ID nunca se repite. Debe registrarse ANTES de
+    `GET /despachos/{id_despacho}` (mismo prefijo, dos segmentos)."""
     admin = get_supabase_admin_client()
     respuesta = (
         admin.table("despachos")
-        .select("creado_por, gestor:perfiles_especialista!creado_por(nombre_completo)")
+        .select("id_gestor, gestor:perfiles_especialista!id_gestor(nombre_completo)")
         .execute()
     )
     vistos: dict[str, str] = {}
     for fila in respuesta.data or []:
-        id_gestor = fila.get("creado_por")
+        id_gestor = fila.get("id_gestor")
         if not id_gestor or id_gestor in vistos:
             continue
         gestor = fila.get("gestor") or {}
@@ -1119,6 +1151,30 @@ def listar_gestores_distintos_de_despachos(
         ({"id": id_gestor, "nombre_completo": nombre} for id_gestor, nombre in vistos.items()),
         key=lambda g: g["nombre_completo"].lower(),
     )
+
+
+@app.get("/despachos/gestores-asignables", response_model=list[GestorDistintoOut])
+def listar_gestores_asignables(
+    usuario: UsuarioAutenticado = Depends(get_current_staff),
+) -> list[dict]:
+    """Personal que puede quedar como gestor asignado de un despacho
+    NUEVO (Select del formulario de creacion) -- GESTOR o ADMIN, activos.
+
+    A diferencia de gestores-distintos (que solo lista a quien YA tiene
+    algun despacho, util para el filtro de la grilla), esta lista tiene
+    que incluir tambien a alguien recien contratado que todavia no tiene
+    ninguno -- si no, no se lo podria asignar nunca el primero. LIQUIDADOR
+    queda afuera: ese rol decide la clasificacion, no trabaja documentos."""
+    admin = get_supabase_admin_client()
+    respuesta = (
+        admin.table("perfiles_especialista")
+        .select("id, nombre_completo")
+        .in_("rol", ["GESTOR", "ADMIN"])
+        .eq("activo", True)
+        .order("nombre_completo")
+        .execute()
+    )
+    return respuesta.data or []
 
 
 def _armar_detalle_despacho(admin: Client, id_despacho: str) -> dict:
@@ -1911,7 +1967,7 @@ def eliminar_usuario(id_usuario: str, usuario: UsuarioAutenticado = Depends(get_
 def _obtener_cliente_o_404(admin: Client, id_cliente: str) -> dict:
     respuesta = admin.table("clientes").select("*").eq("id", id_cliente).execute()
     if not respuesta.data:
-        raise HTTPException(status_code=404, detail=f"No existe un cliente con id {id_cliente}.")
+        raise HTTPException(status_code=404, detail=f"No existe un importador con id {id_cliente}.")
     return respuesta.data[0]
 
 
@@ -1933,7 +1989,11 @@ def crear_cliente(
     except Exception as error:
         if "duplicate key" in str(error) or "23505" in str(error):
             raise HTTPException(
-                status_code=400, detail=f"Ya existe un cliente con RUC '{datos.ruc}'."
+                status_code=400,
+                detail=(
+                    f"Ya existe un importador con {datos.tipo_documento} '{datos.numero_documento}' "
+                    f"o con el código '{datos.codigo}'."
+                ),
             ) from error
         raise
     return respuesta.data[0]
@@ -1953,7 +2013,11 @@ def actualizar_cliente(
     except Exception as error:
         if "duplicate key" in str(error) or "23505" in str(error):
             raise HTTPException(
-                status_code=400, detail=f"Ya existe un cliente con RUC '{datos.ruc}'."
+                status_code=400,
+                detail=(
+                    f"Ya existe un importador con {datos.tipo_documento} '{datos.numero_documento}' "
+                    f"o con el código '{datos.codigo}'."
+                ),
             ) from error
         raise
     return respuesta.data[0]
@@ -1963,11 +2027,11 @@ def actualizar_cliente(
 def eliminar_cliente(
     id_cliente: str, usuario: UsuarioAutenticado = Depends(get_current_staff)
 ) -> dict:
-    """Eliminar un cliente NO borra sus despachos: la FK es ON DELETE SET
-    NULL, asi que los despachos quedan con su nombre en texto libre y
+    """Eliminar un importador NO borra sus despachos: la FK es ON DELETE
+    SET NULL, asi que los despachos quedan con su nombre en texto libre y
     dejan de ser visibles en el portal. Las cuentas de portal de ese
-    cliente si se eliminan en cascada (ON DELETE CASCADE sobre
-    perfiles_especialista), porque una cuenta CLIENTE sin cliente no
+    importador si se eliminan en cascada (ON DELETE CASCADE sobre
+    perfiles_especialista), porque una cuenta CLIENTE sin importador no
     tendria nada que mostrar."""
     _requiere_rol(usuario, set())
     admin = get_supabase_admin_client()

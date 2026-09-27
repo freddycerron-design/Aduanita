@@ -24,6 +24,9 @@ export const queryKeys = {
     /** Gestores (perfiles_especialista) que crearon al menos un despacho,
      * para el filtro "estilo Excel" de esa columna. */
     gestoresDistintos: () => ["despachos", "gestores-distintos"] as const,
+    /** GESTOR/ADMIN activos, para el Select de "gestor asignado" al
+     * crear un despacho -- incluye a quien todavía no tiene ninguno. */
+    gestoresAsignables: () => ["despachos", "gestores-asignables"] as const,
   },
   perfil: (userId: string) => ["perfil", userId] as const,
   pdfSignedUrl: (pathStorage: string) => ["pdf-signed-url", pathStorage] as const,

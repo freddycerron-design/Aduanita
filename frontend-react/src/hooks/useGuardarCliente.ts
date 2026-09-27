@@ -15,10 +15,10 @@ export function useGuardarCliente() {
       id ? actualizarCliente(id, datos) : crearCliente(datos),
     onSuccess: (_cliente, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.clientes.list() });
-      toast.success(variables.id ? "Cliente actualizado." : "Cliente creado.");
+      toast.success(variables.id ? "Importador actualizado." : "Importador creado.");
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "No se pudo guardar el cliente.");
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar el importador.");
     },
   });
 }

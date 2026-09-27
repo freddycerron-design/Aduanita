@@ -98,6 +98,11 @@ create table public.despachos (
                         )),
     fecha_creacion  timestamptz not null default now(),
     creado_por      uuid references public.perfiles_especialista(id),
+    -- Gestor asignado a trabajar el despacho -- normalmente quien lo crea,
+    -- pero un admin puede crear uno y asignarlo a otro gestor del equipo.
+    -- Independiente de creado_por, que es solo auditoria de autoria y
+    -- nunca se elige a mano en el formulario.
+    id_gestor       uuid references public.perfiles_especialista(id),
     actualizado_en  timestamptz not null default now(),
     -- Cliente dueno del despacho (FK agregada en la seccion 15). Nullable:
     -- los despachos previos al portal y los de clientes no registrados se
@@ -107,6 +112,7 @@ create table public.despachos (
 );
 
 create index despachos_creado_por_idx on public.despachos (creado_por);
+create index despachos_id_gestor_idx on public.despachos (id_gestor);
 
 comment on column public.despachos.descripcion is
     'Descripcion libre de la mercancia/operacion, opcional. La escribe el '
@@ -684,14 +690,37 @@ create policy "select_preliquidaciones" on public.preliquidaciones
 --
 -- Los 3 roles del equipo interno (GESTOR/LIQUIDADOR/ADMIN) no cambian:
 -- CLIENTE es una cuenta externa, no un 4to rol del equipo.
+--
+-- "Cliente" se renombro a "Importador" en toda la interfaz; el nombre
+-- interno de la tabla se deja igual para no romper las FKs/RLS/funciones
+-- que ya la referencian (despachos.id_cliente, perfiles_especialista.id_cliente,
+-- cliente_actual(), es_personal_interno()).
 create table public.clientes (
-    id             uuid primary key default gen_random_uuid(),
-    razon_social   text not null,
-    ruc            text unique,
-    activo         boolean not null default true,
-    creado_en      timestamptz not null default now(),
-    actualizado_en timestamptz not null default now()
+    id                uuid primary key default gen_random_uuid(),
+    razon_social      text not null,
+    -- Codigo interno opcional para identificar al importador (no es el id uuid).
+    codigo            text,
+    tipo_persona      text not null check (tipo_persona in ('NATURAL', 'JURIDICA')),
+    tipo_documento    text not null check (tipo_documento in ('DNI', 'RUC')),
+    numero_documento  text not null,
+    -- Calle y numero en un solo campo (ej. "Av. Larco 123"); distrito/
+    -- departamento/pais aparte para poder filtrar/mostrar por separado.
+    direccion_calle   text,
+    distrito          text,
+    departamento      text,
+    pais              text,
+    nombre_contacto   text,
+    telefono_contacto text,
+    email_contacto    text,
+    activo            boolean not null default true,
+    creado_en         timestamptz not null default now(),
+    actualizado_en    timestamptz not null default now(),
+    -- Un DNI y un RUC podrian coincidir como cadena de digitos sin ser la
+    -- misma entidad -- la unicidad va sobre el par, no solo el numero.
+    constraint clientes_documento_unico unique (tipo_documento, numero_documento)
 );
+
+create unique index clientes_codigo_unico_idx on public.clientes (codigo) where codigo is not null;
 
 comment on table public.clientes is
     'Importadores a los que pertenecen los despachos. Habilita el portal del '

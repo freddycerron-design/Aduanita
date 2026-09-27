@@ -46,6 +46,10 @@ export interface DespachoCreate {
   cliente: string;
   descripcion?: string | null;
   id_cliente?: string | null;
+  /** Gestor asignado a trabajar el despacho. Opcional a nivel API (si no
+   * llega, el backend lo asigna a quien crea) pero el formulario lo
+   * exige siempre. */
+  id_gestor?: string | null;
 }
 
 /** Respuesta de GET /despachos: una página + el total de filas que hay en
@@ -364,9 +368,25 @@ export interface UsuarioUpdate {
 
 // --- clientes y portal del importador ---------------------------------
 
+export type TipoPersona = "NATURAL" | "JURIDICA";
+export type TipoDocumentoIdentidad = "DNI" | "RUC";
+
+/** Datos del mantenimiento de Importadores ("Cliente" se renombró a
+ * "Importador" en toda la interfaz; el nombre interno del tipo/tabla
+ * sigue siendo "cliente"). */
 export interface ClienteUpsert {
   razon_social: string;
-  ruc?: string | null;
+  codigo?: string | null;
+  tipo_persona: TipoPersona;
+  tipo_documento: TipoDocumentoIdentidad;
+  numero_documento: string;
+  direccion_calle?: string | null;
+  distrito?: string | null;
+  departamento?: string | null;
+  pais?: string | null;
+  nombre_contacto?: string | null;
+  telefono_contacto?: string | null;
+  email_contacto?: string | null;
   activo: boolean;
 }
 

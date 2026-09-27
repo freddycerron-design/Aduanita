@@ -200,6 +200,13 @@ export function listarGestoresDistintosDeDespachos(): Promise<GestorDistintoOut[
   return apiFetch<GestorDistintoOut[]>("/despachos/gestores-distintos");
 }
 
+/** Personal (GESTOR o ADMIN, activos) que puede quedar como gestor
+ * asignado de un despacho nuevo -- a diferencia de gestores-distintos,
+ * incluye también a quien todavía no tiene ningún despacho. */
+export function listarGestoresAsignables(): Promise<GestorDistintoOut[]> {
+  return apiFetch<GestorDistintoOut[]>("/despachos/gestores-asignables");
+}
+
 export function obtenerDespacho(idDespacho: string): Promise<DespachoDetalleOut> {
   return apiFetch<DespachoDetalleOut>(`/despachos/${idDespacho}`);
 }

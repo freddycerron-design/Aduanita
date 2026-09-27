@@ -30,7 +30,7 @@ export function PortalPage() {
         <div className="flex items-center gap-2.5">
           <img src={logo} alt="Aduafy" className="w-8" />
           <span className="text-sm font-bold">Aduafy</span>
-          <span className="ml-2 hidden text-xs text-texto-secundario sm:inline">Portal del cliente</span>
+          <span className="ml-2 hidden text-xs text-texto-secundario sm:inline">Portal del importador</span>
         </div>
         <div className="flex items-center gap-3">
           <span className="hidden truncate text-xs text-texto-secundario sm:inline">{email}</span>

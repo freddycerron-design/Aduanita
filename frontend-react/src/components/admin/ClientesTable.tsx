@@ -11,8 +11,13 @@ export interface ClientesTableProps {
   onEditar: (cliente: ClienteOut) => void;
 }
 
+const ETIQUETA_TIPO_PERSONA: Record<ClienteOut["tipo_persona"], string> = {
+  NATURAL: "Natural",
+  JURIDICA: "Jurídica",
+};
+
 /** Tabla de importadores registrados -- mismo patrón que las otras tablas
- * de Administración. Registrar un cliente acá es lo que habilita su
+ * de Administración. Registrar un importador acá es lo que habilita su
  * portal: después se le vincula una cuenta con rol Cliente y sus
  * despachos. */
 export function ClientesTable({ clientes, onEditar }: ClientesTableProps) {
@@ -31,7 +36,7 @@ export function ClientesTable({ clientes, onEditar }: ClientesTableProps) {
   if (clientes.length === 0) {
     return (
       <p className="rounded-xl border border-border bg-surface p-4 text-sm text-texto-secundario">
-        No hay clientes registrados todavía.
+        No hay importadores registrados todavía.
       </p>
     );
   }
@@ -40,8 +45,11 @@ export function ClientesTable({ clientes, onEditar }: ClientesTableProps) {
     <Table>
       <TableHeader>
         <TableRow>
+          <TableHead>Código</TableHead>
           <TableHead>Razón social</TableHead>
-          <TableHead>RUC</TableHead>
+          <TableHead>Tipo</TableHead>
+          <TableHead>Documento</TableHead>
+          <TableHead>Contacto</TableHead>
           <TableHead>Estado</TableHead>
           <TableHead />
         </TableRow>
@@ -49,8 +57,26 @@ export function ClientesTable({ clientes, onEditar }: ClientesTableProps) {
       <TableBody>
         {clientes.map((cliente) => (
           <TableRow key={cliente.id}>
+            <TableCell className="whitespace-nowrap font-mono text-xs text-texto-secundario">
+              {cliente.codigo ?? "—"}
+            </TableCell>
             <TableCell className="font-semibold">{cliente.razon_social}</TableCell>
-            <TableCell className="font-mono text-xs text-texto-secundario">{cliente.ruc ?? "—"}</TableCell>
+            <TableCell className="text-texto-secundario">
+              {ETIQUETA_TIPO_PERSONA[cliente.tipo_persona]}
+            </TableCell>
+            <TableCell className="whitespace-nowrap font-mono text-xs text-texto-secundario">
+              {cliente.tipo_documento} {cliente.numero_documento}
+            </TableCell>
+            <TableCell>
+              <div className="flex flex-col gap-0.5">
+                <span>{cliente.nombre_contacto ?? "—"}</span>
+                {(cliente.telefono_contacto || cliente.email_contacto) && (
+                  <span className="text-xs text-texto-secundario">
+                    {[cliente.telefono_contacto, cliente.email_contacto].filter(Boolean).join(" · ")}
+                  </span>
+                )}
+              </div>
+            </TableCell>
             <TableCell>
               <Badge variant={cliente.activo ? "verde" : "neutral"}>
                 {cliente.activo ? "Activo" : "Inactivo"}

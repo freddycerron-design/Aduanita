@@ -182,15 +182,15 @@ export function AdminPage() {
 
       <div className="flex flex-wrap items-center justify-between gap-3 pb-4">
         <div>
-          <h1 className="text-base font-semibold text-texto">Clientes</h1>
+          <h1 className="text-base font-semibold text-texto">Importadores</h1>
           <p className="text-sm text-texto-secundario">
-            Los importadores dueños de los despachos. Registrar un cliente permite vincularle despachos
-            y darle acceso al portal (con una cuenta de rol Cliente).
+            Los dueños de los despachos. Registrar un importador permite vincularle despachos, elegirlo
+            al crear uno nuevo, y darle acceso al portal (con una cuenta de rol Cliente).
           </p>
         </div>
         <Button type="button" onClick={abrirCrearCliente}>
           <Plus className="size-4" />
-          Nuevo cliente
+          Nuevo importador
         </Button>
       </div>
 

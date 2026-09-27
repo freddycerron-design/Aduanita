@@ -15,10 +15,10 @@ export function useEliminarCliente() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.clientes.list() });
       queryClient.invalidateQueries({ queryKey: queryKeys.usuarios.list() });
-      toast.success("Cliente eliminado.");
+      toast.success("Importador eliminado.");
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "No se pudo eliminar el cliente.");
+      toast.error(error instanceof Error ? error.message : "No se pudo eliminar el importador.");
     },
   });
 }

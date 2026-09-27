@@ -27,7 +27,7 @@ const TAMANIO_PAGINA = 15;
 // solo 15 y agruparlos aparte) -- 500 es el tope que el backend admite.
 const LIMITE_AGRUPADO = 500;
 
-/** Opciones fijas del filtro de Estado -- a diferencia de Cliente/Gestor,
+/** Opciones fijas del filtro de Estado -- a diferencia de Importador/Gestor,
  * no hace falta traerlas del backend: son las 3 del enum, siempre las
  * mismas. */
 const OPCIONES_ESTADO = ORDEN_ESTADOS.map((estado) => ({ valor: estado, etiqueta: ESTADO_INFO[estado].label }));
@@ -36,7 +36,7 @@ type Vista = "lista" | "cliente" | "estado";
 
 const VISTAS: { valor: Vista; etiqueta: string }[] = [
   { valor: "lista", etiqueta: "Lista" },
-  { valor: "cliente", etiqueta: "Agrupar por cliente" },
+  { valor: "cliente", etiqueta: "Agrupar por importador" },
   { valor: "estado", etiqueta: "Agrupar por estado" },
 ];
 
@@ -50,10 +50,10 @@ interface Orden {
  * filtrar, ordenar, agrupar y recorrer el listado completo. Antes vivía
  * en un panel lateral angosto (`ExplorerPanel`, ya eliminado) con
  * agrupado fijo por estado y sin paginar; ahora es una grilla a lo ancho
- * de la pantalla, con filtros "estilo Excel" en Cliente/Gestor/Estado
+ * de la pantalla, con filtros "estilo Excel" en Importador/Gestor/Estado
  * (checkbox + Aceptar/Cancelar, ver `ColumnFilter`), orden en Nro/Fecha
  * creación (flecha en el header, ver `ColumnSort`), y un toggle de vista
- * para agrupar el mismo listado por Cliente o por Estado -- todo resuelto
+ * para agrupar el mismo listado por Importador o por Estado -- todo resuelto
  * por el backend (`GET /despachos`), no filtrado/ordenado sobre datos ya
  * traídos.
  *
@@ -150,7 +150,7 @@ export function ExploradorTab() {
             <Input
               value={entradaBusqueda}
               onChange={(evento) => setEntradaBusqueda(evento.target.value)}
-              placeholder="Buscar por número, cliente o descripción"
+              placeholder="Buscar por número, importador o descripción"
               aria-label="Buscar despachos"
               className="pl-9"
             />
@@ -228,9 +228,9 @@ export function ExploradorTab() {
                 </TableHead>
                 <TableHead>
                   <div className="flex items-center gap-1.5">
-                    Cliente
+                    Importador
                     <ColumnFilter
-                      titulo="Cliente"
+                      titulo="Importador"
                       opciones={opcionesCliente}
                       seleccion={clientesFiltro}
                       onAplicar={aplicarClientes}
@@ -313,7 +313,7 @@ type FilaGrilla =
   | { tipo: "divisor"; clave: string; etiqueta: string; cantidad: number }
   | { tipo: "despacho"; despacho: DespachoOut };
 
-/** Agrupa `items` por Cliente o Estado (vista "lista" los deja tal cual,
+/** Agrupa `items` por Importador o Estado (vista "lista" los deja tal cual,
  * sin filas divisorias) preservando el orden relativo que ya trae el
  * backend dentro de cada grupo -- el orden elegido en el header
  * (Nro/Fecha) sigue aplicando DENTRO de cada grupo, agrupar no lo pisa. */

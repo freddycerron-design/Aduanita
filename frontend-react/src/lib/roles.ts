@@ -56,7 +56,7 @@ export const ROL_INFO: Record<Rol, { label: string }> = {
   ADMIN: { label: "Administrador" },
   GESTOR: { label: "Gestor" },
   LIQUIDADOR: { label: "Liquidador" },
-  CLIENTE: { label: "Cliente (portal)" },
+  CLIENTE: { label: "Importador (portal)" },
 };
 
 /** true si la cuenta es externa (portal del importador) y no parte del
