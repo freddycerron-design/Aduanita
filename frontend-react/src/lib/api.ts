@@ -26,6 +26,7 @@ import type {
   CamposPorDocumento,
   EstructuraPorDocumento,
   SubpartidaArancelaria,
+  MedidasSunat,
   TipoDocumento,
   UsuarioCreate,
   UsuarioOut,
@@ -437,4 +438,9 @@ export function buscarEnArancel(q: string, limite = 25): Promise<SubpartidaAranc
  * .xlsx real requiere una libreria server-side). */
 export function descargarExcelDespacho(idDespacho: string): Promise<Blob> {
   return apiFetchBlob(`/despachos/${idDespacho}/exportar-excel`);
+}
+
+/** Gravamenes vigentes de una subpartida (10 digitos) consultados en vivo en SUNAT. */
+export function consultarGravamenesSunat(codigo: string): Promise<MedidasSunat> {
+  return apiFetch<MedidasSunat>(`/arancel/sunat/${encodeURIComponent(codigo)}`);
 }

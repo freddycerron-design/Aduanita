@@ -1,8 +1,10 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { Loader2, Search } from "lucide-react";
+import { ExternalLink, Loader2, Search } from "lucide-react";
 
 import { useBuscarArancel } from "@/hooks/useBuscarArancel";
+import type { SubpartidaArancelaria } from "@/lib/types";
+import { SunatGravamenesDialog } from "@/components/arancel/SunatGravamenesDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -16,6 +18,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 export function ArancelPage() {
   const [entrada, setEntrada] = useState("");
   const [consulta, setConsulta] = useState("");
+  const [partidaSunat, setPartidaSunat] = useState<SubpartidaArancelaria | null>(null);
   const { data: resultados, isFetching, isError, error } = useBuscarArancel(consulta);
 
   function buscar(evento: FormEvent<HTMLFormElement>) {
@@ -72,6 +75,9 @@ export function ArancelPage() {
                   <TableHead>Subpartida</TableHead>
                   <TableHead>Descripción</TableHead>
                   <TableHead>Ad valorem</TableHead>
+                  <TableHead>
+                    <span className="sr-only">Consultar en SUNAT</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -84,6 +90,17 @@ export function ArancelPage() {
                     <TableCell className="whitespace-nowrap font-mono text-xs tabular-nums">
                       {partida.ad_valorem === null ? "—" : `${partida.ad_valorem}%`}
                     </TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => setPartidaSunat(partida)}
+                        className="inline-flex items-center gap-1 rounded text-xs text-coral hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        title="Ver los gravámenes vigentes en SUNAT"
+                      >
+                        <ExternalLink className="size-3.5" />
+                        SUNAT
+                      </button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -94,9 +111,12 @@ export function ArancelPage() {
         <p className="rounded-xl border border-amber/40 bg-amber/10 px-4 py-3 text-xs leading-relaxed text-amber">
           Arancel de Aduanas del Perú 2022 (D.S. 404-2021-EF). La nomenclatura y las descripciones son
           las oficiales de ese documento; el ad valorem puede haber cambiado por decretos posteriores,
-          así que tómalo como referencia y no como la tasa vigente garantizada.
+          así que tómalo como referencia y no como la tasa vigente garantizada. Usa el link SUNAT de cada
+          subpartida para ver los gravámenes vigentes.
         </p>
       </div>
+
+      <SunatGravamenesDialog partida={partidaSunat} onClose={() => setPartidaSunat(null)} />
     </div>
   );
 }

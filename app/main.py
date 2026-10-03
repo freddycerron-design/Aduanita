@@ -72,6 +72,11 @@ from pydantic import BaseModel, Field, ValidationError, computed_field
 from supabase import Client
 
 from app.config import get_settings, get_supabase_admin_client, get_supabase_user_client
+from services.sunat_arancel_service import (
+    MedidasSunat,
+    SunatNoDisponibleError,
+    consultar_medidas_sunat,
+)
 from services.arancel_service import (
     SubpartidaCandidata,
     buscar_por_codigo,
@@ -1037,6 +1042,27 @@ def buscar_en_arancel(
     if es_consulta_de_codigo(consulta):
         return buscar_por_codigo(admin, consulta, limite)
     return buscar_subpartidas_candidatas(admin, consulta, limite)
+
+
+@app.get("/arancel/sunat/{codigo}", response_model=MedidasSunat)
+def consultar_gravamenes_sunat(
+    codigo: str,
+    usuario: UsuarioAutenticado = Depends(get_current_staff),
+) -> MedidasSunat:
+    """Gravamenes vigentes de una subpartida, leidos en vivo del portal de
+    SUNAT (ver services/sunat_arancel_service.py). Complementa al arancel
+    2022 cargado en partidas_arancelarias, cuyo ad valorem puede estar
+    desactualizado."""
+    digitos = codigo.replace(".", "")
+    if not (digitos.isdigit() and len(digitos) == 10):
+        raise HTTPException(status_code=400, detail="La subpartida debe tener 10 dígitos.")
+    try:
+        medidas = consultar_medidas_sunat(digitos)
+    except SunatNoDisponibleError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if medidas is None:
+        raise HTTPException(status_code=404, detail=f"SUNAT no encuentra la subpartida {codigo}.")
+    return medidas
 
 
 @app.post("/despachos", response_model=DespachoOut)

@@ -353,6 +353,14 @@ export interface MetricasOut {
 
 // --- arancel nacional ---------------------------------------------
 
+/** Gravamenes vigentes de una subpartida, leidos en vivo del portal de SUNAT. */
+export interface MedidasSunat {
+  subpartida: string;
+  tipo_producto: string | null;
+  gravamenes: { concepto: string; valor: string }[];
+  url_consulta: string;
+}
+
 export interface SubpartidaArancelaria {
   codigo: string;
   descripcion: string;
