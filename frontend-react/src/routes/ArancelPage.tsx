@@ -74,7 +74,7 @@ export function ArancelPage() {
                 <TableRow>
                   <TableHead>Subpartida</TableHead>
                   <TableHead>Descripción</TableHead>
-                  <TableHead>Ad valorem</TableHead>
+                  <TableHead className="text-right">Ad valorem</TableHead>
                   <TableHead>
                     <span className="sr-only">Consultar en SUNAT</span>
                   </TableHead>
@@ -83,21 +83,21 @@ export function ArancelPage() {
               <TableBody>
                 {resultados.map((partida) => (
                   <TableRow key={partida.codigo}>
-                    <TableCell className="whitespace-nowrap font-mono text-xs font-semibold">
+                    <TableCell className="whitespace-nowrap font-mono text-sm font-semibold tracking-tight">
                       {partida.codigo}
                     </TableCell>
-                    <TableCell className="text-xs leading-relaxed">{partida.descripcion}</TableCell>
-                    <TableCell className="whitespace-nowrap font-mono text-xs tabular-nums">
+                    <TableCell className="max-w-prose text-[15px] leading-relaxed">{partida.descripcion}</TableCell>
+                    <TableCell className="whitespace-nowrap text-right text-[15px] font-medium tabular-nums">
                       {partida.ad_valorem === null ? "—" : `${partida.ad_valorem}%`}
                     </TableCell>
                     <TableCell className="whitespace-nowrap">
                       <button
                         type="button"
                         onClick={() => setPartidaSunat(partida)}
-                        className="inline-flex items-center gap-1 rounded text-xs text-coral hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="inline-flex items-center gap-1 rounded text-sm font-medium text-coral hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         title="Ver los gravámenes vigentes en SUNAT"
                       >
-                        <ExternalLink className="size-3.5" />
+                        <ExternalLink className="size-4" />
                         SUNAT
                       </button>
                     </TableCell>
