@@ -788,3 +788,28 @@ alter table public.clientes enable row level security;
 -- _requiere_rol(usuario, set()) en app/main.py.
 create policy "select_clientes" on public.clientes
     for select using (public.es_personal_interno() or id = public.cliente_actual());
+
+
+-- ---------------------------------------------------------------------
+-- 16. partidas_favoritas
+-- ---------------------------------------------------------------------
+-- Subpartidas que cada usuario marco con la estrella en la consulta de
+-- aranceles, para volver a ellas sin buscarlas. Son personales (no del
+-- equipo): cada fila pertenece a un usuario. Se escribe desde el backend
+-- con service_role filtrando siempre por el usuario del JWT; la policy de
+-- RLS replica ese limite por si alguien lee Postgres directo.
+create table public.partidas_favoritas (
+    id_usuario uuid not null references public.perfiles_especialista(id) on delete cascade,
+    codigo     text not null references public.partidas_arancelarias(codigo) on delete cascade,
+    creado_en  timestamptz not null default now(),
+    primary key (id_usuario, codigo)
+);
+
+comment on table public.partidas_favoritas is
+    'Subpartidas marcadas como favoritas por cada usuario en la consulta de aranceles. '
+    'Personales: cada usuario ve y edita solo las suyas.';
+
+alter table public.partidas_favoritas enable row level security;
+
+create policy "select_partidas_favoritas" on public.partidas_favoritas
+    for select using (id_usuario = (select auth.uid()));

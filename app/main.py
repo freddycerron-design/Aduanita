@@ -1065,6 +1065,52 @@ def consultar_gravamenes_sunat(
     return medidas
 
 
+# Favoritos: personales. Siempre se filtra por usuario.id (del JWT), nunca
+# por un parametro de la request.
+@app.get("/arancel/favoritos", response_model=list[SubpartidaCandidata])
+def listar_partidas_favoritas(
+    usuario: UsuarioAutenticado = Depends(get_current_staff),
+) -> list[SubpartidaCandidata]:
+    filas = (
+        get_supabase_admin_client()
+        .table("partidas_favoritas")
+        .select("partidas_arancelarias(codigo, descripcion, ad_valorem)")
+        .eq("id_usuario", usuario.id)
+        .order("creado_en", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    return [
+        SubpartidaCandidata.model_validate({**fila["partidas_arancelarias"], "rank": 0.0})
+        for fila in filas
+        if fila.get("partidas_arancelarias")
+    ]
+
+
+@app.put("/arancel/favoritos/{codigo}")
+def agregar_partida_favorita(
+    codigo: str, usuario: UsuarioAutenticado = Depends(get_current_staff)
+) -> dict:
+    admin = get_supabase_admin_client()
+    if not admin.table("partidas_arancelarias").select("codigo").eq("codigo", codigo).execute().data:
+        raise HTTPException(status_code=404, detail=f"La subpartida {codigo} no existe en el arancel cargado.")
+    admin.table("partidas_favoritas").upsert(
+        {"id_usuario": usuario.id, "codigo": codigo}, on_conflict="id_usuario,codigo", ignore_duplicates=True
+    ).execute()
+    return {"status": "ok"}
+
+
+@app.delete("/arancel/favoritos/{codigo}")
+def quitar_partida_favorita(
+    codigo: str, usuario: UsuarioAutenticado = Depends(get_current_staff)
+) -> dict:
+    get_supabase_admin_client().table("partidas_favoritas").delete().eq("id_usuario", usuario.id).eq(
+        "codigo", codigo
+    ).execute()
+    return {"status": "ok"}
+
+
 @app.post("/despachos", response_model=DespachoOut)
 def crear_despacho(datos: DespachoCreate, usuario: UsuarioAutenticado = Depends(get_current_staff)) -> dict:
     admin = get_supabase_admin_client()

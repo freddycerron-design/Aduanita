@@ -444,3 +444,17 @@ export function descargarExcelDespacho(idDespacho: string): Promise<Blob> {
 export function consultarGravamenesSunat(codigo: string): Promise<MedidasSunat> {
   return apiFetch<MedidasSunat>(`/arancel/sunat/${encodeURIComponent(codigo)}`);
 }
+
+// --- partidas favoritas (personales del usuario autenticado) ----------------
+
+export function listarPartidasFavoritas(): Promise<SubpartidaArancelaria[]> {
+  return apiFetch<SubpartidaArancelaria[]>("/arancel/favoritos");
+}
+
+export function agregarPartidaFavorita(codigo: string): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>(`/arancel/favoritos/${encodeURIComponent(codigo)}`, { method: "PUT" });
+}
+
+export function quitarPartidaFavorita(codigo: string): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>(`/arancel/favoritos/${encodeURIComponent(codigo)}`, { method: "DELETE" });
+}
