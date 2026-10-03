@@ -290,6 +290,12 @@ ETIQUETA_CAMPO: dict[str, str] = {
     "vendedor_exportador": "Vendedor / exportador",
     "tipo_embalaje": "Tipo de embalaje",
     "marcas_numeros": "Marcas y números",
+    "items": "Ítems",
+    "descripcion": "Descripción",
+    "cantidad": "Cantidad",
+    "unidad_medida": "Unidad de medida",
+    "precio_unitario": "Precio unitario",
+    "material_declarado": "Material declarado",
 }
 
 

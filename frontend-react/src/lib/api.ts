@@ -24,6 +24,7 @@ import type {
   ReglaValidacionOut,
   ReglaValidacionUpsert,
   CamposPorDocumento,
+  EstructuraPorDocumento,
   SubpartidaArancelaria,
   TipoDocumento,
   UsuarioCreate,
@@ -304,6 +305,10 @@ export function listarReglasValidacion(): Promise<ReglaValidacionOut[]> {
 
 export function listarCamposComparables(): Promise<CamposPorDocumento> {
   return apiFetch<CamposPorDocumento>("/admin/reglas-validacion/campos");
+}
+
+export function obtenerEstructuraDocumentos(): Promise<EstructuraPorDocumento> {
+  return apiFetch<EstructuraPorDocumento>("/admin/documentos/estructura");
 }
 
 export function crearReglaValidacion(datos: ReglaValidacionUpsert): Promise<ReglaValidacionOut> {

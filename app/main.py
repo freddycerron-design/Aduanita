@@ -62,7 +62,7 @@ documentos. Dos barreras independientes lo sostienen:
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Literal, get_args, get_origin
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
@@ -470,6 +470,53 @@ class ReglaValidacionOut(ReglaValidacionUpsert):
 class CampoDocumentoOut(BaseModel):
     campo: str
     etiqueta: str
+
+
+class CampoEstructuraOut(BaseModel):
+    campo: str
+    etiqueta: str
+    tipo_dato: Literal["Texto", "Número", "Entero", "Fecha"]
+    obligatorio: bool
+    descripcion: str | None
+
+
+class ListaDetalleOut(BaseModel):
+    campo: str
+    etiqueta: str
+    columnas: list[CampoEstructuraOut]
+
+
+class EstructuraDocumentoOut(BaseModel):
+    cabecera: list[CampoEstructuraOut]
+    detalle: list[ListaDetalleOut]
+
+
+_TIPO_DATO_LEGIBLE = {str: "Texto", float: "Número", int: "Entero", date: "Fecha"}
+
+
+def _describir_campos(schema: type[BaseModel]) -> tuple[list[dict], list[dict]]:
+    """Separa los campos de un schema en cabecera (valores sueltos) y
+    detalle (listas de sub-modelos, ej. `items`), con su tipo legible."""
+    cabecera: list[dict] = []
+    detalle: list[dict] = []
+    for nombre, campo in schema.model_fields.items():
+        argumentos = get_args(campo.annotation)
+        if get_origin(campo.annotation) is list:
+            sub = argumentos[0] if argumentos else None
+            if isinstance(sub, type) and issubclass(sub, BaseModel):
+                columnas, _ = _describir_campos(sub)
+                detalle.append({"campo": nombre, "etiqueta": etiqueta_campo(nombre), "columnas": columnas})
+            continue
+        # `str | None` -> str
+        base = next((a for a in argumentos if a is not type(None)), campo.annotation)
+        cabecera.append({
+            "campo": nombre,
+            "etiqueta": etiqueta_campo(nombre),
+            "tipo_dato": _TIPO_DATO_LEGIBLE.get(base, "Texto"),
+            "obligatorio": campo.is_required(),
+            "descripcion": campo.description,
+        })
+    return cabecera, detalle
 
 
 class CargoEspecialArancelUpsert(BaseModel):
@@ -1736,6 +1783,21 @@ def listar_campos_comparables(
         ]
         for tipo, schema in TIPO_A_SCHEMA.items()
     }
+
+
+@app.get("/admin/documentos/estructura", response_model=dict[str, EstructuraDocumentoOut])
+def obtener_estructura_documentos(
+    usuario: UsuarioAutenticado = Depends(get_current_staff),
+) -> dict[str, dict]:
+    """Por tipo de documento, los datos que la extraccion devuelve:
+    cabecera (comparables en reglas) y detalle por linea. Solo lectura,
+    sale directo de los schemas de pdf_processor."""
+    _requiere_rol(usuario, set())
+    resultado: dict[str, dict] = {}
+    for tipo, schema in TIPO_A_SCHEMA.items():
+        cabecera, detalle = _describir_campos(schema)
+        resultado[tipo] = {"cabecera": cabecera, "detalle": detalle}
+    return resultado
 
 
 @app.post("/admin/reglas-validacion", response_model=ReglaValidacionOut)

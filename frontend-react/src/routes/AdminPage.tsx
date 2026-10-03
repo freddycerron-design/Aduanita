@@ -21,12 +21,13 @@ import { UsuarioForm } from "@/components/admin/UsuarioForm";
 import { UsuariosTable } from "@/components/admin/UsuariosTable";
 import { ClienteForm } from "@/components/admin/ClienteForm";
 import { ClientesTable } from "@/components/admin/ClientesTable";
+import { DatosDocumentosPanel } from "@/components/admin/DatosDocumentosPanel";
 
 /** Orden de las pestañas: primero el "quién" (cuentas del equipo e
  * importadores), después el "cómo" (reglas de negocio que configuran el
  * comportamiento del sistema). */
-type PestanaAdmin = "usuarios" | "importadores" | "reglas" | "cargos";
-const PESTANAS_VALIDAS: PestanaAdmin[] = ["usuarios", "importadores", "reglas", "cargos"];
+type PestanaAdmin = "usuarios" | "importadores" | "reglas" | "datos-documentos" | "cargos";
+const PESTANAS_VALIDAS: PestanaAdmin[] = ["usuarios", "importadores", "reglas", "datos-documentos", "cargos"];
 
 /**
  * Panel de administracion, una pestaña por mantenimiento (antes las
@@ -102,6 +103,7 @@ export function AdminPage() {
             <TabsTrigger value="usuarios">Usuarios y roles</TabsTrigger>
             <TabsTrigger value="importadores">Importadores</TabsTrigger>
             <TabsTrigger value="reglas">Reglas de validación</TabsTrigger>
+            <TabsTrigger value="datos-documentos">Datos de Documentos</TabsTrigger>
             <TabsTrigger value="cargos">Cargos especiales</TabsTrigger>
           </TabsList>
 
@@ -171,6 +173,11 @@ export function AdminPage() {
             )}
           </TabsContent>
 
+          <TabsContent value="datos-documentos">
+            <EncabezadoSeccion descripcion="Qué datos se extraen de cada tipo de documento. Es una referencia para armar reglas de validación; no se edita desde aquí." />
+            <DatosDocumentosPanel />
+          </TabsContent>
+
           <TabsContent value="cargos">
             <EncabezadoSeccion
               descripcion="Tasas de antidumping y derecho específico por subpartida (no hay fuente oficial CSV/API para esto -- son resoluciones puntuales de INDECOPI/MEF). Se usan como valor sugerido al calcular la pre-liquidación de un despacho."
@@ -205,24 +212,26 @@ export function AdminPage() {
   );
 }
 
-/** Descripción de la sección a la izquierda y el botón de alta a la
- * derecha -- igual en las cuatro pestañas. */
+/** Descripción de la sección a la izquierda y, si la pestaña permite
+ * altas, el botón a la derecha. */
 function EncabezadoSeccion({
   descripcion,
   accion,
   onAccion,
 }: {
   descripcion: ReactNode;
-  accion: string;
-  onAccion: () => void;
+  accion?: string;
+  onAccion?: () => void;
 }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-3 pb-4">
       <p className="max-w-3xl text-sm text-texto-secundario">{descripcion}</p>
-      <Button type="button" onClick={onAccion}>
-        <Plus className="size-4" />
-        {accion}
-      </Button>
+      {accion && onAccion && (
+        <Button type="button" onClick={onAccion}>
+          <Plus className="size-4" />
+          {accion}
+        </Button>
+      )}
     </div>
   );
 }

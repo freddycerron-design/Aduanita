@@ -36,6 +36,7 @@ export const queryKeys = {
   /** Fuera del prefijo "reglas-validacion" a proposito: guardar una regla
    * invalida ese prefijo, y los campos (salen de los schemas) no cambian. */
   camposComparables: () => ["campos-comparables"] as const,
+  estructuraDocumentos: () => ["estructura-documentos"] as const,
   preliquidacion: {
     detail: (idDespacho: string) => ["preliquidacion", idDespacho] as const,
   },

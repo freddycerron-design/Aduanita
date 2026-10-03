@@ -326,6 +326,22 @@ export interface CampoDocumento {
 
 export type CamposPorDocumento = Record<TipoDocumento, CampoDocumento[]>;
 
+export interface CampoEstructura {
+  campo: string;
+  etiqueta: string;
+  tipo_dato: "Texto" | "Número" | "Entero" | "Fecha";
+  /** true = la extraccion siempre lo devuelve; false = puede venir vacio. */
+  obligatorio: boolean;
+  descripcion: string | null;
+}
+
+export interface EstructuraDocumento {
+  cabecera: CampoEstructura[];
+  detalle: { campo: string; etiqueta: string; columnas: CampoEstructura[] }[];
+}
+
+export type EstructuraPorDocumento = Record<TipoDocumento, EstructuraDocumento>;
+
 // --- métricas de inicio ---------------------------------------------
 
 export interface MetricasOut {
