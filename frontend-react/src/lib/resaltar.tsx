@@ -33,7 +33,7 @@ export function resaltar(texto: string, raices: string[]): ReactNode {
   return texto.split(/([\p{L}\p{N}]+)/u).map((parte, i) => {
     const normal = normalizar(parte);
     return raices.some((r) => normal.startsWith(r)) ? (
-      <mark key={i} className="rounded bg-amber/25 px-0.5 font-medium text-texto">
+      <mark key={i} className="rounded-sm bg-resaltado px-0.5 text-resaltado-texto">
         {parte}
       </mark>
     ) : (

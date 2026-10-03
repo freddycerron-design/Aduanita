@@ -26,6 +26,10 @@
   --color-rojo: #df4c3a;
   --color-texto: #f4f5f7;
   --color-texto-secundario: #93a0b4;
+  /* Marcador de coincidencias de búsqueda: amarillo pastel con texto
+   * oscuro, legible sobre el fondo oscuro sin ser chillón. */
+  --color-resaltado: #f6e7a1;
+  --color-resaltado-texto: #1b1f30;
 
   /* Alias shadcn/ui, mapeados sobre la misma paleta */
   --color-background: var(--color-bg);
