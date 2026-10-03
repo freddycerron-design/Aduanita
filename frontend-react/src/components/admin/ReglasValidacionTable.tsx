@@ -1,5 +1,6 @@
 import { Pencil, Trash2 } from "lucide-react";
 
+import { useCamposComparables } from "@/hooks/useCamposComparables";
 import { useEliminarReglaValidacion } from "@/hooks/useEliminarReglaValidacion";
 import { useGuardarReglaValidacion } from "@/hooks/useGuardarReglaValidacion";
 import type { ReglaValidacionOut } from "@/lib/types";
@@ -21,6 +22,11 @@ export interface ReglasValidacionTableProps {
 export function ReglasValidacionTable({ reglas, onEditar }: ReglasValidacionTableProps) {
   const guardar = useGuardarReglaValidacion();
   const eliminar = useEliminarReglaValidacion();
+  const { data: campos } = useCamposComparables();
+
+  function etiqueta(documento: ReglaValidacionOut["documento_a"], campo: string) {
+    return campos?.[documento]?.find((o) => o.campo === campo)?.etiqueta ?? campo;
+  }
 
   function alternarActivo(regla: ReglaValidacionOut) {
     const { id, creado_en, actualizado_en, ...datos } = regla;
@@ -61,8 +67,10 @@ export function ReglasValidacionTable({ reglas, onEditar }: ReglasValidacionTabl
                 <span className="text-texto-secundario">{regla.nombre}</span>
               </div>
             </TableCell>
-            <TableCell className="font-mono text-xs text-texto-secundario">
-              {regla.documento_a}.{regla.campo_a} → {regla.documento_b}.{regla.campo_b}
+            <TableCell className="text-xs text-texto-secundario">
+              <span className="font-mono">{regla.documento_a}</span> · {etiqueta(regla.documento_a, regla.campo_a)}
+              {" → "}
+              <span className="font-mono">{regla.documento_b}</span> · {etiqueta(regla.documento_b, regla.campo_b)}
             </TableCell>
             <TableCell>
               <Badge variant="coral">{ETIQUETA_TIPO[regla.tipo_comparacion]}</Badge>

@@ -1,9 +1,17 @@
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 
+import { useCamposComparables } from "@/hooks/useCamposComparables";
 import { useGuardarReglaValidacion } from "@/hooks/useGuardarReglaValidacion";
 import { TIPOS_DOCUMENTO } from "@/lib/types";
-import type { ReglaValidacionOut, ReglaValidacionUpsert, Severidad, TipoComparacion } from "@/lib/types";
+import type {
+  CamposPorDocumento,
+  ReglaValidacionOut,
+  ReglaValidacionUpsert,
+  Severidad,
+  TipoComparacion,
+  TipoDocumento,
+} from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -135,6 +143,55 @@ function SelectSeveridad({
   );
 }
 
+/** Radix Select no admite "" como valor de un item. */
+const SIN_CAMPO = "__ninguno__";
+
+function SelectCampo({
+  id,
+  documento,
+  value,
+  onChange,
+  campos,
+  opcional = false,
+}: {
+  id: string;
+  documento: string;
+  value: string;
+  onChange: (valor: string) => void;
+  campos: CamposPorDocumento | undefined;
+  opcional?: boolean;
+}) {
+  const opciones = campos?.[documento as TipoDocumento] ?? [];
+  // Una regla vieja podria apuntar a un campo que ya no esta en la lista:
+  // se muestra igual para no dejar el select en blanco al editarla.
+  const huerfano = value !== "" && campos !== undefined && !opciones.some((o) => o.campo === value);
+
+  return (
+    <Select
+      value={value === "" ? (opcional ? SIN_CAMPO : "") : value}
+      onValueChange={(v) => onChange(v === SIN_CAMPO ? "" : v)}
+      disabled={campos === undefined}
+    >
+      <SelectTrigger id={id}>
+        <SelectValue placeholder={campos === undefined ? "Cargando campos..." : "Elige un dato"} />
+      </SelectTrigger>
+      <SelectContent>
+        {opcional && <SelectItem value={SIN_CAMPO}>Ninguno</SelectItem>}
+        {opciones.map((o) => (
+          <SelectItem key={o.campo} value={o.campo}>
+            {o.etiqueta}
+          </SelectItem>
+        ))}
+        {huerfano && <SelectItem value={value}>{value}</SelectItem>}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function campoExiste(campos: CamposPorDocumento | undefined, documento: string, campo: string) {
+  return campos?.[documento as TipoDocumento]?.some((o) => o.campo === campo) ?? false;
+}
+
 export interface ReglaValidacionFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -146,14 +203,15 @@ export interface ReglaValidacionFormProps {
  * Modal de crear/editar una regla de validacion. Los campos comunes son
  * fijos; el bloque de "parametros" cambia segun `tipo_comparacion`
  * elegido (los 3 tipos que interpreta el motor generico, ver
- * services/validation_engine.py). La existencia real de `campo_a`/
- * `campo_b` en el schema Pydantic del documento elegido la valida el
- * backend al guardar -- no se duplica esa lista aca, un campo invalido
- * se muestra como toast de error.
+ * services/validation_engine.py). Los campos de cada documento se eligen
+ * de una lista que arma el backend desde sus schemas
+ * (`/admin/reglas-validacion/campos`), con nombres legibles -- el backend
+ * igual revalida que existan al guardar.
  */
 export function ReglaValidacionForm({ open, onOpenChange, regla }: ReglaValidacionFormProps) {
   const guardar = useGuardarReglaValidacion();
-  const [errorMoneda, setErrorMoneda] = useState<string | null>(null);
+  const { data: campos } = useCamposComparables();
+  const [errorFormulario, setErrorFormulario] = useState<string | null>(null);
 
   const { register, handleSubmit, watch, setValue, reset } = useForm<FormValues>({
     defaultValues: valoresIniciales(regla),
@@ -164,20 +222,35 @@ export function ReglaValidacionForm({ open, onOpenChange, regla }: ReglaValidaci
   // abierto) se resetea explicitamente cada vez que cambia el objetivo.
   useEffect(() => {
     reset(valoresIniciales(regla));
-    setErrorMoneda(null);
+    setErrorFormulario(null);
   }, [regla, reset]);
 
   const tipoComparacion = watch("tipo_comparacion");
+  const documentoA = watch("documento_a");
+  const documentoB = watch("documento_b");
   const campoMonedaA = watch("campo_moneda_a");
 
+  /** Al cambiar de documento, los campos elegidos que no existen en el
+   * nuevo se limpian (p.ej. "Monto total" no existe en el BL). */
+  function cambiarDocumento(lado: "a" | "b", documento: string) {
+    setValue(`documento_${lado}`, documento);
+    for (const campo of [`campo_${lado}`, `campo_moneda_${lado}`] as const) {
+      if (!campoExiste(campos, documento, watch(campo))) setValue(campo, "");
+    }
+  }
+
   function onSubmit(v: FormValues) {
+    if (!v.campo_a || !v.campo_b) {
+      setErrorFormulario("Elige el dato a comparar de cada documento.");
+      return;
+    }
     const tieneMonedaA = v.campo_moneda_a.trim() !== "";
     const tieneMonedaB = v.campo_moneda_b.trim() !== "";
     if (tieneMonedaA !== tieneMonedaB) {
-      setErrorMoneda("campo_moneda_a y campo_moneda_b deben venir juntos (ambos vacíos o ambos completos).");
+      setErrorFormulario("La moneda se elige en los dos documentos o en ninguno.");
       return;
     }
-    setErrorMoneda(null);
+    setErrorFormulario(null);
     guardar.mutate(
       { id: regla?.id, datos: aRequest(v) },
       { onSuccess: () => onOpenChange(false) },
@@ -217,7 +290,7 @@ export function ReglaValidacionForm({ open, onOpenChange, regla }: ReglaValidaci
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <Label>Documento A</Label>
-              <Select value={watch("documento_a")} onValueChange={(v) => setValue("documento_a", v)}>
+              <Select value={documentoA} onValueChange={(v) => cambiarDocumento("a", v)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -231,13 +304,19 @@ export function ReglaValidacionForm({ open, onOpenChange, regla }: ReglaValidaci
               </Select>
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="campo_a">Campo de A</Label>
-              <Input id="campo_a" className="font-mono" placeholder="p.ej. peso_bruto_kg" required {...register("campo_a")} />
+              <Label htmlFor="campo_a">Dato de A</Label>
+              <SelectCampo
+                id="campo_a"
+                documento={documentoA}
+                value={watch("campo_a")}
+                onChange={(v) => setValue("campo_a", v)}
+                campos={campos}
+              />
             </div>
 
             <div className="flex flex-col gap-1.5">
               <Label>Documento B</Label>
-              <Select value={watch("documento_b")} onValueChange={(v) => setValue("documento_b", v)}>
+              <Select value={documentoB} onValueChange={(v) => cambiarDocumento("b", v)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -251,8 +330,14 @@ export function ReglaValidacionForm({ open, onOpenChange, regla }: ReglaValidaci
               </Select>
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="campo_b">Campo de B</Label>
-              <Input id="campo_b" className="font-mono" placeholder="p.ej. peso_bruto_kg" required {...register("campo_b")} />
+              <Label htmlFor="campo_b">Dato de B</Label>
+              <SelectCampo
+                id="campo_b"
+                documento={documentoB}
+                value={watch("campo_b")}
+                onChange={(v) => setValue("campo_b", v)}
+                campos={campos}
+              />
             </div>
           </div>
 
@@ -369,12 +454,26 @@ export function ReglaValidacionForm({ open, onOpenChange, regla }: ReglaValidaci
 
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="campo_moneda_a">Campo moneda A (opcional)</Label>
-              <Input id="campo_moneda_a" className="font-mono" placeholder="p.ej. moneda" {...register("campo_moneda_a")} />
+              <Label htmlFor="campo_moneda_a">Moneda en A (opcional)</Label>
+              <SelectCampo
+                id="campo_moneda_a"
+                documento={documentoA}
+                value={campoMonedaA}
+                onChange={(v) => setValue("campo_moneda_a", v)}
+                campos={campos}
+                opcional
+              />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="campo_moneda_b">Campo moneda B (opcional)</Label>
-              <Input id="campo_moneda_b" className="font-mono" placeholder="p.ej. moneda" {...register("campo_moneda_b")} />
+              <Label htmlFor="campo_moneda_b">Moneda en B (opcional)</Label>
+              <SelectCampo
+                id="campo_moneda_b"
+                documento={documentoB}
+                value={watch("campo_moneda_b")}
+                onChange={(v) => setValue("campo_moneda_b", v)}
+                campos={campos}
+                opcional
+              />
             </div>
           </div>
           {campoMonedaA.trim() !== "" && (
@@ -387,12 +486,12 @@ export function ReglaValidacionForm({ open, onOpenChange, regla }: ReglaValidaci
               />
             </div>
           )}
-          {errorMoneda && <p className="text-sm text-rojo">{errorMoneda}</p>}
-
           <label className="flex items-center gap-2 text-sm text-texto">
             <input type="checkbox" className="accent-coral" {...register("activo")} />
             Regla activa
           </label>
+
+          {errorFormulario && <p className="text-sm text-rojo">{errorFormulario}</p>}
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

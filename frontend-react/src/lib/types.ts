@@ -317,6 +317,15 @@ export interface ReglaValidacionOut extends ReglaValidacionUpsert {
   actualizado_en: string;
 }
 
+/** Un campo comparable de un tipo de documento: nombre tecnico (lo que se
+ * guarda en la regla) + nombre legible (lo que ve el usuario). */
+export interface CampoDocumento {
+  campo: string;
+  etiqueta: string;
+}
+
+export type CamposPorDocumento = Record<TipoDocumento, CampoDocumento[]>;
+
 // --- métricas de inicio ---------------------------------------------
 
 export interface MetricasOut {

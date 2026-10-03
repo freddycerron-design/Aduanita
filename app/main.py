@@ -95,6 +95,7 @@ from services.pdf_processor import (
     TipoDocumento,
     derivar_nivel_confianza,
     detectar_tipo_contenido,
+    etiqueta_campo,
     procesar_documento,
 )
 from services.rag_service import buscar_antecedentes, guardar_feedback
@@ -464,6 +465,11 @@ class ReglaValidacionOut(ReglaValidacionUpsert):
     id: str
     creado_en: str
     actualizado_en: str
+
+
+class CampoDocumentoOut(BaseModel):
+    campo: str
+    etiqueta: str
 
 
 class CargoEspecialArancelUpsert(BaseModel):
@@ -1712,6 +1718,24 @@ def listar_reglas_validacion(usuario: UsuarioAutenticado = Depends(get_current_s
     _requiere_rol(usuario, set())
     admin = get_supabase_admin_client()
     return admin.table("reglas_validacion").select("*").order("nombre").execute().data or []
+
+
+@app.get("/admin/reglas-validacion/campos", response_model=dict[str, list[CampoDocumentoOut]])
+def listar_campos_comparables(
+    usuario: UsuarioAutenticado = Depends(get_current_staff),
+) -> dict[str, list[dict]]:
+    """Por tipo de documento, los campos que una regla puede comparar --
+    los mismos que acepta `_validar_regla_o_400`, menos las listas (`items`):
+    el motor lee el campo con getattr y compara un valor escalar."""
+    _requiere_rol(usuario, set())
+    return {
+        tipo: [
+            {"campo": nombre, "etiqueta": etiqueta_campo(nombre)}
+            for nombre, campo in schema.model_fields.items()
+            if get_origin(campo.annotation) is not list
+        ]
+        for tipo, schema in TIPO_A_SCHEMA.items()
+    }
 
 
 @app.post("/admin/reglas-validacion", response_model=ReglaValidacionOut)

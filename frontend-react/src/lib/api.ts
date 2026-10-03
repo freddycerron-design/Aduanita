@@ -23,6 +23,7 @@ import type {
   PreliquidacionOut,
   ReglaValidacionOut,
   ReglaValidacionUpsert,
+  CamposPorDocumento,
   SubpartidaArancelaria,
   TipoDocumento,
   UsuarioCreate,
@@ -299,6 +300,10 @@ export function registrarDecision(
 
 export function listarReglasValidacion(): Promise<ReglaValidacionOut[]> {
   return apiFetch<ReglaValidacionOut[]>("/admin/reglas-validacion");
+}
+
+export function listarCamposComparables(): Promise<CamposPorDocumento> {
+  return apiFetch<CamposPorDocumento>("/admin/reglas-validacion/campos");
 }
 
 export function crearReglaValidacion(datos: ReglaValidacionUpsert): Promise<ReglaValidacionOut> {

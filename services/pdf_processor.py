@@ -252,6 +252,50 @@ TIPO_A_SCHEMA: dict[TipoDocumento, Type[BaseModel]] = {
     "PACKING_LIST": PackingListSchema,
 }
 
+# Nombre legible de cada campo para la UI (el configurador de reglas los
+# ofrece en una lista; el usuario no conoce los nombres tecnicos). Va aparte
+# de los schemas a proposito: un `title` en el Field cambiaria el JSON
+# Schema que se le manda a Gemini. Un campo sin entrada aca cae a
+# `etiqueta_campo`, que lo humaniza a partir del nombre.
+ETIQUETA_CAMPO: dict[str, str] = {
+    "numero_factura": "Número de factura",
+    "fecha_emision": "Fecha de emisión",
+    "vendedor": "Vendedor",
+    "comprador_consignatario": "Comprador / consignatario",
+    "incoterm": "Incoterm",
+    "moneda": "Moneda",
+    "monto_total": "Monto total",
+    "peso_bruto_kg": "Peso bruto (kg)",
+    "peso_neto_kg": "Peso neto (kg)",
+    "cantidad_bultos": "Cantidad de bultos",
+    "descripcion_mercancia": "Descripción de la mercancía",
+    "numero_poliza": "Número de póliza",
+    "asegurado": "Asegurado",
+    "valor_asegurado": "Valor asegurado",
+    "cobertura": "Cobertura",
+    "referencia_factura": "Factura referenciada",
+    "numero_operacion": "Número de operación",
+    "ordenante": "Ordenante",
+    "beneficiario": "Beneficiario",
+    "monto": "Monto transferido",
+    "fecha_valor": "Fecha valor",
+    "referencia_pago": "Referencia de pago",
+    "numero_bl": "Número de BL",
+    "embarcador_shipper": "Embarcador (shipper)",
+    "consignatario": "Consignatario",
+    "notify_party": "Notify party",
+    "puerto_embarque": "Puerto de embarque",
+    "puerto_descarga": "Puerto de descarga",
+    "numero_packing_list": "Número de packing list",
+    "vendedor_exportador": "Vendedor / exportador",
+    "tipo_embalaje": "Tipo de embalaje",
+    "marcas_numeros": "Marcas y números",
+}
+
+
+def etiqueta_campo(nombre: str) -> str:
+    return ETIQUETA_CAMPO.get(nombre) or nombre.replace("_", " ").capitalize()
+
 _NOMBRE_DOCUMENTO_LEGIBLE: dict[TipoDocumento, str] = {
     "FACTURA": "Factura Comercial",
     "SEGURO": "Poliza / Aplicacion de Seguro de carga",
