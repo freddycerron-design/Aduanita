@@ -67,7 +67,7 @@ function TablaPartidas({ partidas, favoritos, onAlternarFavorito, onVerSunat, ra
                     />
                   </button>
                 </TableCell>
-                <TableCell className="whitespace-nowrap font-mono text-sm font-semibold tracking-tight">
+                <TableCell className="whitespace-nowrap font-mono text-base font-semibold tracking-tight">
                   {partida.codigo}
                 </TableCell>
                 <TableCell className="max-w-prose text-[15px] leading-relaxed">
