@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { ExternalLink, Loader2, Search, Star, Trash2 } from "lucide-react";
+import { Check, Copy, ExternalLink, Loader2, Search, Star, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
 
 import { useBuscarArancel } from "@/hooks/useBuscarArancel";
@@ -15,6 +16,39 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const ES_CODIGO = /^[\d.]+$/;
+
+/** Copia el código tal como se muestra (con puntos). El ícono pasa a un
+ * check un momento para confirmar la copia. */
+function CopiarCodigo({ codigo }: { codigo: string }) {
+  const [copiado, setCopiado] = useState(false);
+
+  useEffect(() => {
+    if (!copiado) return;
+    const id = window.setTimeout(() => setCopiado(false), 1500);
+    return () => window.clearTimeout(id);
+  }, [copiado]);
+
+  async function copiar() {
+    try {
+      await navigator.clipboard.writeText(codigo);
+      setCopiado(true);
+    } catch {
+      toast.error("No se pudo copiar el código.");
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={copiar}
+      aria-label={`Copiar ${codigo}`}
+      title={copiado ? "Copiado" : "Copiar código"}
+      className="rounded p-1 text-texto-secundario transition-colors hover:bg-surface-border hover:text-texto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      {copiado ? <Check className="size-4 text-verde" /> : <Copy className="size-4" />}
+    </button>
+  );
+}
 
 interface TablaPartidasProps {
   partidas: SubpartidaArancelaria[];
@@ -67,8 +101,11 @@ function TablaPartidas({ partidas, favoritos, onAlternarFavorito, onVerSunat, ra
                     />
                   </button>
                 </TableCell>
-                <TableCell className="whitespace-nowrap font-mono text-base font-semibold tracking-tight">
-                  {partida.codigo}
+                <TableCell className="whitespace-nowrap">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-base font-semibold tracking-tight">{partida.codigo}</span>
+                    <CopiarCodigo codigo={partida.codigo} />
+                  </div>
                 </TableCell>
                 <TableCell className="max-w-prose text-[15px] leading-relaxed">
                   {resaltar(partida.descripcion, raices)}
