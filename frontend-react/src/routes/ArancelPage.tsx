@@ -119,7 +119,7 @@ function TablaPartidas({ partidas, favoritos, onAlternarFavorito, onVerSunat, ra
                       type="button"
                       onClick={() => onVerSunat(partida)}
                       className="inline-flex items-center gap-1 rounded text-sm font-medium text-coral hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      title="Ver los gravámenes vigentes en SUNAT"
+                      title="Ver ubicación en el arancel y gravámenes vigentes en SUNAT"
                     >
                       <ExternalLink className="size-4" />
                       SUNAT
@@ -281,7 +281,7 @@ export function ArancelPage() {
         </p>
       </div>
 
-      <SunatGravamenesDialog partida={partidaSunat} onClose={() => setPartidaSunat(null)} />
+      <SunatGravamenesDialog key={partidaSunat?.codigo ?? ""} partida={partidaSunat} onClose={() => setPartidaSunat(null)} />
     </div>
   );
 }

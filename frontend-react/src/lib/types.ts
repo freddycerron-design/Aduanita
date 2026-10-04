@@ -361,7 +361,32 @@ export interface MedidasSunat {
   subpartida: string;
   tipo_producto: string | null;
   gravamenes: { concepto: string; valor: string }[];
+  /** Ubicación en la nomenclatura tal como la lista SUNAT (sección,
+   * capítulo y partidas vecinas); null si no se pudo leer el listado. */
+  ubicacion: UbicacionNomenclatura | null;
   url_consulta: string;
+}
+
+export interface EncabezadoNomenclatura {
+  numero: string;
+  titulo: string;
+}
+
+export interface LineaNomenclatura {
+  /** null en textos intermedios sin código propio ("- - - Los demás:"). */
+  codigo: string | null;
+  descripcion: string;
+  /** Guiones de sangría de SUNAT; 0 = partida de 4 dígitos. */
+  nivel: number;
+  /** Solo las de 10 dígitos se pueden consultar. */
+  es_subpartida_nacional: boolean;
+  es_actual: boolean;
+}
+
+export interface UbicacionNomenclatura {
+  seccion: EncabezadoNomenclatura | null;
+  capitulo: EncabezadoNomenclatura | null;
+  lineas: LineaNomenclatura[];
 }
 
 export interface SubpartidaArancelaria {
