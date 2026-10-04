@@ -19,6 +19,7 @@ romperia un parseo posicional.
 """
 
 import html
+from html.parser import HTMLParser
 import re
 
 import httpx
@@ -212,3 +213,128 @@ def consultar_medidas_sunat(codigo: str) -> MedidasSunat | None:
         ubicacion=ubicacion,
         url_consulta=URL_CONSULTA,
     )
+
+
+# ---------------------------------------------------------------------------
+# Anexos de la subpartida ("Otros requisitos para la comercializacion con
+# otros paises" al pie del detalle de SUNAT)
+# ---------------------------------------------------------------------------
+
+# tipo -> (accion del portal, titulo). Todas leen la subpartida de la
+# sesion abierta por la busqueda: abiertas como link suelto (sin el POST
+# previo) SUNAT responde su "Pagina de Errores", por eso se consultan desde
+# el backend y no se enlazan directo.
+ANEXOS_SUNAT: dict[str, tuple[str, str]] = {
+    "correlaciones": ("consultarPartidaCorrelacion", "Correlaciones"),
+    "convenios": ("consultarConvenio", "Convenio internacional"),
+    "restricciones": ("consultarPartidaRestriccion", "Restricciones"),
+    "descripciones": ("consultarPartidaDescripciones", "Descripciones mínimas"),
+}
+
+
+class AnexoSunat(BaseModel):
+    tipo: str
+    titulo: str
+    # HTML ya saneado (ver _HtmlSaneado): solo estructura de tabla y texto,
+    # sin atributos, scripts, links ni imagenes.
+    html: str
+
+
+class _HtmlSaneado(HTMLParser):
+    """Reescribe el HTML de SUNAT dejando solo etiquetas de estructura
+    (tablas, parrafos, negritas) SIN atributos, y todo el texto escapado.
+    El frontend lo inserta como HTML, asi que esta lista blanca es la
+    barrera contra cualquier cosa que el portal (o alguien en el medio,
+    es HTTP plano) pueda inyectar."""
+
+    _PERMITIDAS = {"table", "thead", "tbody", "tr", "td", "th", "p", "br", "b", "strong", "ul", "ol", "li"}
+    _DESCARTAR_CONTENIDO = {"script", "style", "head", "title", "select", "option", "button"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.partes: list[str] = []
+        self._descartando = 0
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag in self._DESCARTAR_CONTENIDO:
+            self._descartando += 1
+        elif not self._descartando and tag in self._PERMITIDAS:
+            extra = ""
+            # colspan/rowspan sostienen la forma de las tablas; solo numeros.
+            for nombre, valor in attrs:
+                if nombre in ("colspan", "rowspan") and valor and valor.isdigit():
+                    extra += f' {nombre}="{valor}"'
+            self.partes.append(f"<{tag}{extra}>")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._DESCARTAR_CONTENIDO:
+            self._descartando = max(0, self._descartando - 1)
+        elif not self._descartando and tag in self._PERMITIDAS and tag != "br":
+            self.partes.append(f"</{tag}>")
+
+    def handle_data(self, data: str) -> None:
+        if self._descartando:
+            return
+        texto = " ".join(data.split())
+        # "Retornar" es el boton de volver del portal, sin sentido aca.
+        if texto and texto.lower() != "retornar":
+            self.partes.append(html.escape(texto))
+
+
+def _sanear(contenido: str) -> str:
+    saneador = _HtmlSaneado()
+    saneador.feed(contenido)
+    saneador.close()
+    resultado = " ".join(saneador.partes)
+    # Filas y celdas que quedaron vacias al sacar imagenes/links.
+    resultado = re.sub(r"<td>\s*</td>", "<td></td>", resultado)
+    resultado = re.sub(r"<tr>(\s*<td></td>)*\s*</tr>", "", resultado)
+    return resultado
+
+
+def consultar_anexo_sunat(codigo: str, tipo: str) -> AnexoSunat | None:
+    """Pagina anexa de la subpartida (ver ANEXOS_SUNAT), con su HTML
+    saneado. None si SUNAT dice que la subpartida no existe."""
+    accion, titulo = ANEXOS_SUNAT[tipo]
+    digitos = codigo.replace(".", "")
+    try:
+        with httpx.Client(
+            timeout=TIMEOUT_SEGUNDOS,
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; Aduafy)"},
+        ) as cliente:
+            cliente.get(URL_CONSULTA).raise_for_status()
+            busqueda = cliente.post(
+                URL_CONSULTA,
+                params={"accion": "buscarPartida", "esframe": "1"},
+                data={"cod_partida": digitos, "desc_partida": ""},
+            )
+            busqueda.raise_for_status()
+            if "No se encuentra partida" in busqueda.content.decode("latin-1"):
+                return None
+            pagina = cliente.get(URL_CONSULTA, params={"accion": accion, "cod_partida": digitos})
+            pagina.raise_for_status()
+    except httpx.HTTPError as error:
+        raise SunatNoDisponibleError(f"No se pudo consultar el portal de SUNAT: {error}") from error
+
+    contenido = pagina.content.decode("latin-1")
+    if "Pagina de Errores" in contenido:
+        raise SunatNoDisponibleError("SUNAT respondió con su página de error para esta consulta.")
+    return AnexoSunat(tipo=tipo, titulo=titulo, html=_sanear(contenido))
+
+
+URL_CONSOLIDADO_CRITERIOS = "http://www.aduanet.gob.pe/aduanas/infoaduanas/clasifica/consolidado/indice93-2003-1.zip"
+URL_RESOLUCIONES_CLASIFICACION = "http://www.aduanet.gob.pe/ol-ad-caInter/regclasInterS01Alias"
+
+
+def descargar_consolidado_criterios() -> bytes:
+    """ZIP del Consolidado de Indice de Criterios de clasificacion (es el
+    mismo archivo para toda subpartida). Pasa por el backend porque SUNAT
+    solo lo sirve por HTTP y el navegador bloquea esa descarga desde una
+    pagina HTTPS."""
+    try:
+        respuesta = httpx.get(URL_CONSOLIDADO_CRITERIOS, timeout=60, follow_redirects=True)
+        respuesta.raise_for_status()
+    except httpx.HTTPError as error:
+        raise SunatNoDisponibleError(f"No se pudo descargar el consolidado de SUNAT: {error}") from error
+    return respuesta.content

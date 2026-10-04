@@ -7,6 +7,7 @@ import { consultarGravamenesSunat } from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
 import { cn } from "@/lib/utils";
 import type { LineaNomenclatura, SubpartidaArancelaria, UbicacionNomenclatura } from "@/lib/types";
+import { OtrosRequisitosSunat } from "@/components/arancel/OtrosRequisitosSunat";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -135,6 +136,9 @@ export function SunatGravamenesDialog({ partida, onClose }: SunatGravamenesDialo
                   )}
                 </section>
               </div>
+
+              {/* key: al saltar a otra subpartida se cierra el anexo abierto. */}
+              <OtrosRequisitosSunat key={codigo} codigo={codigo} />
             </div>
           ) : null}
         </div>

@@ -73,9 +73,12 @@ from supabase import Client
 
 from app.config import get_settings, get_supabase_admin_client, get_supabase_user_client
 from services.sunat_arancel_service import (
+    AnexoSunat,
     MedidasSunat,
     SunatNoDisponibleError,
+    consultar_anexo_sunat,
     consultar_medidas_sunat,
+    descargar_consolidado_criterios,
 )
 from services.arancel_service import (
     SubpartidaCandidata,
@@ -1074,6 +1077,44 @@ def consultar_gravamenes_sunat(
     if medidas is None:
         raise HTTPException(status_code=404, detail=f"SUNAT no encuentra la subpartida {codigo}.")
     return medidas
+
+
+@app.get("/arancel/consolidado-criterios")
+def descargar_consolidado_criterios_sunat(
+    usuario: UsuarioAutenticado = Depends(get_current_staff),
+) -> Response:
+    """Consolidado de Indice de Criterios de clasificacion de SUNAT (ZIP)."""
+    try:
+        contenido = descargar_consolidado_criterios()
+    except SunatNoDisponibleError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return Response(
+        content=contenido,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="consolidado-indice-criterios-sunat.zip"'},
+    )
+
+
+@app.get("/arancel/sunat/{codigo}/anexos/{tipo}", response_model=AnexoSunat)
+def consultar_anexo_subpartida_sunat(
+    codigo: str,
+    tipo: Literal["correlaciones", "convenios", "restricciones", "descripciones"],
+    usuario: UsuarioAutenticado = Depends(get_current_staff),
+) -> AnexoSunat:
+    """Paginas anexas del detalle de SUNAT (correlaciones, convenios,
+    restricciones, descripciones minimas). Pasan por el backend porque el
+    portal solo las sirve dentro de la sesion de una busqueda: un link
+    directo devuelve su pagina de error."""
+    digitos = codigo.replace(".", "")
+    if not (digitos.isdigit() and len(digitos) == 10):
+        raise HTTPException(status_code=400, detail="La subpartida debe tener 10 dígitos.")
+    try:
+        anexo = consultar_anexo_sunat(digitos, tipo)
+    except SunatNoDisponibleError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if anexo is None:
+        raise HTTPException(status_code=404, detail=f"SUNAT no encuentra la subpartida {codigo}.")
+    return anexo
 
 
 # Favoritos: personales. Siempre se filtra por usuario.id (del JWT), nunca

@@ -367,6 +367,16 @@ export interface MedidasSunat {
   url_consulta: string;
 }
 
+export type TipoAnexoSunat = "correlaciones" | "convenios" | "restricciones" | "descripciones";
+
+export interface AnexoSunat {
+  tipo: TipoAnexoSunat;
+  titulo: string;
+  /** HTML saneado en el backend: solo tablas/párrafos/negritas, sin
+   * atributos, scripts, links ni imágenes. */
+  html: string;
+}
+
 export interface EncabezadoNomenclatura {
   numero: string;
   titulo: string;

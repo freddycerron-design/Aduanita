@@ -26,7 +26,9 @@ import type {
   CamposPorDocumento,
   EstructuraPorDocumento,
   SubpartidaArancelaria,
+  AnexoSunat,
   MedidasSunat,
+  TipoAnexoSunat,
   TipoDocumento,
   UsuarioCreate,
   UsuarioOut,
@@ -443,6 +445,17 @@ export function descargarExcelDespacho(idDespacho: string): Promise<Blob> {
 /** Gravamenes vigentes de una subpartida (10 digitos) consultados en vivo en SUNAT. */
 export function consultarGravamenesSunat(codigo: string): Promise<MedidasSunat> {
   return apiFetch<MedidasSunat>(`/arancel/sunat/${encodeURIComponent(codigo)}`);
+}
+
+/** Página anexa del detalle de SUNAT (correlaciones, convenios...), con su
+ * HTML ya saneado por el backend. */
+export function consultarAnexoSunat(codigo: string, tipo: TipoAnexoSunat): Promise<AnexoSunat> {
+  return apiFetch<AnexoSunat>(`/arancel/sunat/${encodeURIComponent(codigo)}/anexos/${tipo}`);
+}
+
+/** ZIP del Consolidado de Índice de Criterios de clasificación de SUNAT. */
+export function descargarConsolidadoCriterios(): Promise<Blob> {
+  return apiFetchBlob("/arancel/consolidado-criterios");
 }
 
 // --- partidas favoritas (personales del usuario autenticado) ----------------

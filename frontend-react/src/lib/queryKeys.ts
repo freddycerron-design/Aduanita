@@ -56,6 +56,7 @@ export const queryKeys = {
   arancel: {
     busqueda: (q: string) => ["arancel", q] as const,
     sunat: (codigo: string) => ["arancel-sunat", codigo] as const,
+    anexoSunat: (codigo: string, tipo: string) => ["arancel-sunat-anexo", codigo, tipo] as const,
     favoritos: () => ["arancel-favoritos"] as const,
   },
 };
