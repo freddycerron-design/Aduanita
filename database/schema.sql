@@ -232,6 +232,7 @@ create table public.historial_clasificaciones (
     tipo_accion              text not null check (tipo_accion in ('APROBADO', 'EDITADO')),
     motivo_modificacion      text,
     embedding                vector(768) not null,
+    modelo_embedding         text not null,
     peso_prioridad           float not null default 1.0,
     aprobado_por             uuid not null references public.perfiles_especialista(id),
     creado_en                timestamptz not null default now(),
@@ -241,8 +242,16 @@ create table public.historial_clasificaciones (
 );
 
 comment on column public.historial_clasificaciones.embedding is
-    'Vector de 768 dimensiones generado con Gemini text-embedding-004 sobre '
-    'descripcion_comercial + atributos_json (ver rag_service.construir_texto_para_embedding).';
+    'Vector de 768 dimensiones sobre descripcion_comercial + atributos_json (ver '
+    'rag_service.construir_texto_para_embedding), generado con el modelo de modelo_embedding.';
+-- Vectores de modelos distintos no son comparables entre si (cada modelo
+-- usa su propio espacio), por eso cada fila registra con que modelo se
+-- genero y la busqueda filtra por el modelo vigente. Al cambiar de modelo,
+-- scripts/recalcular_embeddings.py regenera las filas viejas a partir del
+-- texto guardado (descripcion_comercial + atributos_json); mientras corre,
+-- la busqueda sigue funcionando con las filas ya regeneradas.
+comment on column public.historial_clasificaciones.modelo_embedding is
+    'Modelo de Gemini con que se genero `embedding` (ej. gemini-embedding-001).';
 comment on column public.historial_clasificaciones.peso_prioridad is
     '1.0 cuando el humano aprobo la sugerencia de la IA tal cual; 2.0 cuando la corrigio '
     '(una correccion es una senal mas fuerte para el RAG que una aprobacion pasiva).';
@@ -297,10 +306,15 @@ comment on column public.borradores_correo.canal_envio is
 --
 -- search_path incluye "extensions" ademas de "public" porque el operador
 -- <=> (distancia de coseno) vive ahi junto con la extension vector.
+--
+-- `modelo` restringe la busqueda a vectores del mismo modelo que el de la
+-- consulta (ver historial_clasificaciones.modelo_embedding); null = sin
+-- filtro, solo para compatibilidad.
 create or replace function public.match_antecedentes_aduaneros(
     query_embedding vector(768),
     match_count     int default 5,
-    min_similarity  float default 0.0
+    min_similarity  float default 0.0,
+    modelo          text default null
 )
 returns table (
     id                        uuid,
@@ -329,6 +343,7 @@ as $$
         (1 - (h.embedding <=> query_embedding)) * h.peso_prioridad as score_ponderado
     from public.historial_clasificaciones h
     where 1 - (h.embedding <=> query_embedding) >= min_similarity
+      and (modelo is null or h.modelo_embedding = modelo)
     order by score_ponderado desc
     limit match_count;
 $$;
