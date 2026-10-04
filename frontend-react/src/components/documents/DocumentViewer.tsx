@@ -4,6 +4,7 @@ import { FileJson, Image as ImageIcon, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { puedeCorregirDatosExtraidos } from "@/lib/roles";
 import { TIPOS_DOCUMENTO } from "@/lib/types";
+import { NOMBRE_DOCUMENTO, NOMBRE_DOCUMENTO_CORTO } from "@/lib/documentos";
 import type {
   DocumentoExtraidoOut,
   EstadoDespacho,
@@ -85,6 +86,7 @@ export function DocumentViewer({ idDespacho, estadoDespacho, documentos }: Docum
               type="button"
               onClick={() => alternarSeleccion(tipo)}
               aria-pressed={activo}
+              title={NOMBRE_DOCUMENTO[tipo]}
               className={cn(
                 "rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
                 activo
@@ -92,11 +94,11 @@ export function DocumentViewer({ idDespacho, estadoDespacho, documentos }: Docum
                   : "border-border bg-surface text-texto-secundario hover:text-texto",
               )}
             >
-              {tipo}
+              {NOMBRE_DOCUMENTO_CORTO[tipo]}
             </button>
           );
         })}
-        <span className="text-xs text-texto-secundario">
+        <span className="text-[13px] text-texto-secundario">
           Elige hasta {MAX_SELECCION} para comparar ({tiposAVer.length}/{MAX_SELECCION})
         </span>
       </div>
@@ -158,9 +160,7 @@ function DocumentPane({
     <div className="flex min-w-0 flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="truncate text-xs font-semibold uppercase tracking-wide text-texto-secundario">
-            {tipo}
-          </span>
+          <span className="truncate text-sm font-semibold text-texto">{NOMBRE_DOCUMENTO[tipo]}</span>
           {documento.editado_en ? (
             // La revision de una persona pesa mas que el score de la
             // maquina, asi que reemplaza al badge de confianza.
@@ -226,7 +226,7 @@ function DocumentPane({
               </div>
 
               {documento.campos_inciertos.length > 0 && !editando && (
-                <p className="rounded-lg border border-amber/40 bg-amber/10 p-3 text-xs text-amber">
+                <p className="rounded-lg border border-amber/40 bg-amber/10 p-3 text-[13px] text-amber">
                   El modelo no leyó con seguridad:{" "}
                   {documento.campos_inciertos.map((campo) => campo.replace(/_/g, " ")).join(", ")}.
                   Compáralos con el original antes de continuar.
@@ -274,13 +274,13 @@ function DocumentPane({
             <img
               src={signedUrl.data}
               className="h-[480px] w-full rounded-xl border border-border object-contain bg-surface"
-              alt={`Documento original: ${tipo}`}
+              alt={`Documento original: ${NOMBRE_DOCUMENTO[tipo]}`}
             />
           ) : (
             <iframe
               src={signedUrl.data}
               className="h-[480px] w-full rounded-xl border border-border"
-              title={`Documento original: ${tipo}`}
+              title={`Documento original: ${NOMBRE_DOCUMENTO[tipo]}`}
             />
           )
         ) : null)}

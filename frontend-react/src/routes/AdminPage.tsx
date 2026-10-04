@@ -103,7 +103,7 @@ export function AdminPage() {
             <TabsTrigger value="usuarios">Usuarios y roles</TabsTrigger>
             <TabsTrigger value="importadores">Importadores</TabsTrigger>
             <TabsTrigger value="reglas">Reglas de validación</TabsTrigger>
-            <TabsTrigger value="datos-documentos">Datos de Documentos</TabsTrigger>
+            <TabsTrigger value="datos-documentos">Datos de documentos</TabsTrigger>
             <TabsTrigger value="cargos">Cargos especiales</TabsTrigger>
           </TabsList>
 

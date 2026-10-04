@@ -3,6 +3,7 @@ import { Pencil, Trash2 } from "lucide-react";
 import { useCamposComparables } from "@/hooks/useCamposComparables";
 import { useEliminarReglaValidacion } from "@/hooks/useEliminarReglaValidacion";
 import { useGuardarReglaValidacion } from "@/hooks/useGuardarReglaValidacion";
+import { NOMBRE_DOCUMENTO_CORTO } from "@/lib/documentos";
 import type { ReglaValidacionOut } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,10 +68,12 @@ export function ReglasValidacionTable({ reglas, onEditar }: ReglasValidacionTabl
                 <span className="text-texto-secundario">{regla.nombre}</span>
               </div>
             </TableCell>
-            <TableCell className="text-xs text-texto-secundario">
-              <span className="font-mono">{regla.documento_a}</span> · {etiqueta(regla.documento_a, regla.campo_a)}
+            <TableCell className="text-[13px] text-texto-secundario">
+              <span className="font-medium text-texto">{NOMBRE_DOCUMENTO_CORTO[regla.documento_a]}</span> ·{" "}
+              {etiqueta(regla.documento_a, regla.campo_a)}
               {" → "}
-              <span className="font-mono">{regla.documento_b}</span> · {etiqueta(regla.documento_b, regla.campo_b)}
+              <span className="font-medium text-texto">{NOMBRE_DOCUMENTO_CORTO[regla.documento_b]}</span> ·{" "}
+              {etiqueta(regla.documento_b, regla.campo_b)}
             </TableCell>
             <TableCell>
               <Badge variant="coral">{ETIQUETA_TIPO[regla.tipo_comparacion]}</Badge>

@@ -88,7 +88,7 @@ export function PreliquidacionTab({ idDespacho, documentos }: PreliquidacionTabP
   if (isError) {
     return (
       <p className="text-sm text-rojo">
-        No se pudo cargar la pre-liquidación{error instanceof Error ? `: ${error.message}` : "."}
+        No se pudo cargar la preliquidación{error instanceof Error ? `: ${error.message}` : "."}
       </p>
     );
   }
@@ -96,7 +96,7 @@ export function PreliquidacionTab({ idDespacho, documentos }: PreliquidacionTabP
   if (!data?.subpartida_vigente) {
     return (
       <p className="rounded-xl border border-border bg-surface p-4 text-sm text-texto-secundario">
-        Aún no hay una subpartida determinada. Completa la pestaña Pre Clasificación primero.
+        Aún no hay una subpartida determinada. Completa la pestaña Preclasificación primero.
       </p>
     );
   }
@@ -119,7 +119,7 @@ export function PreliquidacionTab({ idDespacho, documentos }: PreliquidacionTabP
       <section className="flex flex-col gap-3">
         <div>
           <h2 className="text-sm font-semibold text-texto">Cálculo de tributos</h2>
-          <p className="text-xs text-texto-secundario">
+          <p className="text-[13px] text-texto-secundario">
             Subpartida vigente: <span className="font-mono font-semibold text-texto">{data.subpartida_vigente}</span>
             . El Valor CIF viene precargado con una sugerencia calculada de la Factura y el Seguro (o el CIF
             directo si el incoterm ya es CIF) -- revísalo y corrígelo antes de calcular.
@@ -178,7 +178,7 @@ export function PreliquidacionTab({ idDespacho, documentos }: PreliquidacionTabP
           </form>
         ) : (
           <p className="text-sm text-texto-secundario">
-            Solo un especialista o liquidador puede calcular la pre-liquidación.
+            Solo un especialista o liquidador puede calcular la preliquidación.
           </p>
         )}
       </section>
@@ -213,7 +213,7 @@ export function PreliquidacionTab({ idDespacho, documentos }: PreliquidacionTabP
               </tbody>
             </table>
           </div>
-          <p className="rounded-xl border border-amber/40 bg-amber/10 px-4 py-3 text-xs leading-relaxed text-amber">
+          <p className="rounded-xl border border-amber/40 bg-amber/10 px-4 py-3 text-[13px] leading-relaxed text-amber">
             Antidumping y derecho específico requieren verificación caso a caso (INDECOPI/MEF) -- los valores
             de arriba son sugerencias, no una tasa vigente garantizada. No se aplica tipo de cambio: todos los
             montos quedan en la moneda del Valor CIF.

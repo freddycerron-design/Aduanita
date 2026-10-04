@@ -30,7 +30,7 @@ export function PortalPage() {
         <div className="flex items-center gap-2.5">
           <img src={logo} alt="Aduafy" className="w-8" />
           <span className="text-sm font-bold">Aduafy</span>
-          <span className="ml-2 hidden text-xs text-texto-secundario sm:inline">Portal del importador</span>
+          <span className="ml-2 hidden text-[13px] text-texto-secundario sm:inline">Portal del importador</span>
         </div>
         <div className="flex items-center gap-3">
           <span className="hidden truncate text-xs text-texto-secundario sm:inline">{email}</span>
@@ -80,7 +80,7 @@ export function PortalPage() {
                   const info = ESTADO_INFO[despacho.estado];
                   return (
                     <TableRow key={despacho.id}>
-                      <TableCell className="font-mono text-xs font-semibold">
+                      <TableCell className="whitespace-nowrap font-mono text-sm font-semibold">
                         {despacho.numero_despacho}
                       </TableCell>
                       <TableCell>

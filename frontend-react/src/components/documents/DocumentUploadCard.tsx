@@ -4,6 +4,7 @@ import { CheckCircle2, FileText, Trash2, UploadCloud } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { DocumentoExtraidoOut, TipoDocumento } from "@/lib/types";
+import { NOMBRE_DOCUMENTO, NOMBRE_DOCUMENTO_CORTO } from "@/lib/documentos";
 import { useEliminarDocumento } from "@/hooks/useEliminarDocumento";
 import { useSubirDocumento } from "@/hooks/useSubirDocumento";
 import { Button } from "@/components/ui/button";
@@ -50,9 +51,21 @@ export function DocumentUploadCard({ idDespacho, tipo, documento, disabled }: Do
     if (archivo) subir.mutate({ tipoDocumento: tipo, archivo });
   }
 
+  // Tres estados visualmente distintos: verde queda reservado para
+  // "procesado" (ya hay datos extraidos), y "cargado" va en ambar porque
+  // todavia falta un paso -- antes los dos se veian verdes y no se
+  // distinguia a simple vista que documento faltaba extraer.
   const Icono = procesado ? CheckCircle2 : FileText;
   const colorIcono = procesado ? "text-verde" : cargado ? "text-amber" : "text-texto-secundario";
-  const etiquetaEstado = procesado ? "Procesado" : cargado ? "Cargado, pendiente de procesar" : "Sin cargar";
+  const clasesTarjeta = procesado
+    ? "border-verde/40 bg-verde/10"
+    : cargado
+      ? "border-amber/40 bg-amber/10"
+      : "bg-surface";
+  const colorEstado = procesado ? "text-verde" : cargado ? "text-amber" : "text-texto-secundario";
+  const etiquetaEstado = procesado ? "Procesado" : cargado ? "Cargado, falta procesar" : "Sin cargar";
+  const nombre = NOMBRE_DOCUMENTO_CORTO[tipo];
+  const nombreCompleto = NOMBRE_DOCUMENTO[tipo];
   const etiquetaBoton = subir.isPending
     ? "Subiendo..."
     : eliminar.isPending
@@ -62,11 +75,11 @@ export function DocumentUploadCard({ idDespacho, tipo, documento, disabled }: Do
         : "Elegir PDF o foto";
 
   return (
-    <Card className={cn(cargado ? "border-verde/40 bg-verde/10" : "bg-surface-border")}>
+    <Card className={clasesTarjeta}>
       <CardHeader className="flex-row items-center justify-between gap-2">
-        <CardTitle className="flex items-center gap-2 font-normal">
+        <CardTitle className="flex items-center gap-2 font-normal" title={nombreCompleto}>
           <Icono className={cn("size-4 shrink-0", colorIcono)} aria-hidden="true" />
-          {tipo}
+          {nombre}
         </CardTitle>
         {cargado && (
           <Button
@@ -75,8 +88,8 @@ export function DocumentUploadCard({ idDespacho, tipo, documento, disabled }: Do
             size="icon"
             onClick={() => eliminar.mutate(tipo)}
             disabled={controlesDeshabilitados}
-            aria-label={`Eliminar ${tipo}`}
-            title={`Eliminar ${tipo}`}
+            aria-label={`Eliminar ${nombreCompleto}`}
+            title={`Eliminar ${nombreCompleto}`}
             className="text-rojo hover:bg-rojo/10 hover:text-rojo [&_svg]:size-5"
           >
             <Trash2 />
@@ -84,7 +97,7 @@ export function DocumentUploadCard({ idDespacho, tipo, documento, disabled }: Do
         )}
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        <p className="text-xs text-texto-secundario">{etiquetaEstado}</p>
+        <p className={cn("text-[13px] font-medium", colorEstado)}>{etiquetaEstado}</p>
         <input
           ref={inputRef}
           type="file"

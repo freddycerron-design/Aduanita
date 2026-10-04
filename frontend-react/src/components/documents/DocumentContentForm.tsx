@@ -174,7 +174,7 @@ export function DocumentContentForm({
               </div>
 
               {filas.length === 0 ? (
-                <p className="text-xs text-texto-secundario">
+                <p className="text-[13px] text-texto-secundario">
                   El documento no detalla líneas. Puedes agregarlas a mano.
                 </p>
               ) : (
@@ -184,7 +184,7 @@ export function DocumentContentForm({
                     className="flex flex-col gap-2 rounded-lg border border-border bg-bg p-3"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-texto-secundario">
+                      <span className="text-[13px] font-semibold text-texto-secundario">
                         Línea {indice + 1}
                       </span>
                       <Button

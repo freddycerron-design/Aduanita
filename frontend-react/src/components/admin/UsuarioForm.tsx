@@ -181,7 +181,7 @@ export function UsuarioForm({ open, onOpenChange, usuario }: UsuarioFormProps) {
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-texto-secundario">
+              <p className="text-[13px] text-texto-secundario">
                 Una cuenta de portal sin importador vinculado no puede ver ningún despacho.
               </p>
             </div>

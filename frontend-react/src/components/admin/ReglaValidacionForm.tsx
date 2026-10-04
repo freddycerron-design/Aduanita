@@ -3,6 +3,7 @@ import { useForm } from "react-hook-form";
 
 import { useCamposComparables } from "@/hooks/useCamposComparables";
 import { useGuardarReglaValidacion } from "@/hooks/useGuardarReglaValidacion";
+import { NOMBRE_DOCUMENTO } from "@/lib/documentos";
 import { TIPOS_DOCUMENTO } from "@/lib/types";
 import type {
   CamposPorDocumento,
@@ -28,6 +29,13 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 
 const SEVERIDADES: Severidad[] = ["ALTA", "MEDIA", "NINGUNA"];
+/** Etiqueta visible de cada severidad -- el valor del enum se guarda tal
+ * cual, pero no se le muestra crudo al admin. */
+const ETIQUETA_SEVERIDAD: Record<Severidad, string> = {
+  ALTA: "Alta",
+  MEDIA: "Media",
+  NINGUNA: "Sin hallazgo",
+};
 const TIPOS_COMPARACION: { valor: TipoComparacion; etiqueta: string }[] = [
   { valor: "RANGO_ASIMETRICO", etiqueta: "Rango asimétrico (numérico)" },
   { valor: "IGUALDAD_EXACTA", etiqueta: "Igualdad exacta" },
@@ -135,7 +143,7 @@ function SelectSeveridad({
       <SelectContent>
         {SEVERIDADES.map((s) => (
           <SelectItem key={s} value={s}>
-            {s}
+            {ETIQUETA_SEVERIDAD[s]}
           </SelectItem>
         ))}
       </SelectContent>
@@ -297,7 +305,7 @@ export function ReglaValidacionForm({ open, onOpenChange, regla }: ReglaValidaci
                 <SelectContent>
                   {TIPOS_DOCUMENTO.map((t) => (
                     <SelectItem key={t} value={t}>
-                      {t}
+                      {NOMBRE_DOCUMENTO[t]}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -323,7 +331,7 @@ export function ReglaValidacionForm({ open, onOpenChange, regla }: ReglaValidaci
                 <SelectContent>
                   {TIPOS_DOCUMENTO.map((t) => (
                     <SelectItem key={t} value={t}>
-                      {t}
+                      {NOMBRE_DOCUMENTO[t]}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -373,7 +381,7 @@ export function ReglaValidacionForm({ open, onOpenChange, regla }: ReglaValidaci
 
           {tipoComparacion === "RANGO_ASIMETRICO" && (
             <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-3">
-              <p className="text-xs text-texto-secundario">
+              <p className="text-[13px] leading-relaxed text-texto-secundario">
                 Compara la diferencia relativa de B respecto de A. Por debajo del umbral inferior o por
                 encima del superior, dispara la severidad correspondiente; en el medio, sin hallazgo.
               </p>

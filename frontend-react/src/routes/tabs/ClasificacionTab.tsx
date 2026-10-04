@@ -93,7 +93,7 @@ export function ClasificacionTab({
           sustentoLegal={clasificacion.sustento_legal_rgi}
         />
         <Aviso tono="info">
-          Propuesta lista. Ve a la pestaña Revisión y presiona &quot;Enviar a Clasificación&quot; para que el
+          Propuesta lista. Ve a la pestaña Revisión y presiona &quot;Enviar a clasificación&quot; para que el
           liquidador pueda decidir.
         </Aviso>
       </div>
@@ -116,7 +116,8 @@ export function ClasificacionTab({
           <ClassificationHero
             subpartida={decision.subpartida_final_humano}
             confianza={aprobada ? "ALTA" : "BAJA"}
-            etiquetaSecundaria={decision.tipo_accion}
+            etiquetaSecundaria={ETIQUETA_TIPO_ACCION[decision.tipo_accion]}
+            titulo="Subpartida final"
             sustentoLegal="Subpartida final decidida por el liquidador."
           />
         ) : (
@@ -183,6 +184,12 @@ export function ClasificacionTab({
     </div>
   );
 }
+
+/** `tipo_accion` es un enum interno; en pantalla va en tipo oración. */
+const ETIQUETA_TIPO_ACCION: Record<HistorialClasificacionOut["tipo_accion"], string> = {
+  APROBADO: "Aprobado",
+  EDITADO: "Editado",
+};
 
 const TONOS_AVISO = {
   info: "border-border bg-surface text-texto-secundario",

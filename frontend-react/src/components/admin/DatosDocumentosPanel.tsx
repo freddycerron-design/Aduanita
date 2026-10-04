@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { useEstructuraDocumentos } from "@/hooks/useEstructuraDocumentos";
+import { NOMBRE_DOCUMENTO } from "@/lib/documentos";
 import { TIPOS_DOCUMENTO } from "@/lib/types";
 import type { CampoEstructura, TipoDocumento } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
@@ -8,14 +9,6 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-
-const NOMBRE_DOCUMENTO: Record<TipoDocumento, string> = {
-  FACTURA: "Factura comercial",
-  SEGURO: "Póliza de seguro",
-  SWIFT_BANCARIO: "Transferencia bancaria (SWIFT)",
-  BL: "Bill of Lading (BL)",
-  PACKING_LIST: "Packing list",
-};
 
 function TablaCampos({ campos }: { campos: CampoEstructura[] }) {
   return (
@@ -36,7 +29,7 @@ function TablaCampos({ campos }: { campos: CampoEstructura[] }) {
             <TableCell>
               <Badge variant={c.obligatorio ? "verde" : "neutral"}>{c.obligatorio ? "Siempre" : "Puede faltar"}</Badge>
             </TableCell>
-            <TableCell className="text-xs text-texto-secundario">{c.descripcion ?? "—"}</TableCell>
+            <TableCell className="text-[13px] text-texto-secundario">{c.descripcion ?? "—"}</TableCell>
           </TableRow>
         ))}
       </TableBody>

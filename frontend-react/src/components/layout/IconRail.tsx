@@ -31,7 +31,7 @@ interface IconRailProps {
   email: string | null | undefined;
 }
 
-const ITEM_HOME: ItemRuta = { path: "/", icono: Home, etiqueta: "Home" };
+const ITEM_HOME: ItemRuta = { path: "/", icono: Home, etiqueta: "Inicio" };
 
 // Mismo icono que la tarjeta "Validador Documental (Docfy)" del Home
 // (ver MODULOS en HomePage.tsx): es la misma sección, solo que aca se

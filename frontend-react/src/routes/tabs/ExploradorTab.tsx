@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { FolderOpen, Plus, Search } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import type { CampoOrdenDespachos, DireccionOrden } from "@/lib/api";
 import { ESTADO_INFO, ORDEN_ESTADOS } from "@/lib/estado";
@@ -31,6 +31,26 @@ const LIMITE_AGRUPADO = 500;
  * no hace falta traerlas del backend: son las 3 del enum, siempre las
  * mismas. */
 const OPCIONES_ESTADO = ORDEN_ESTADOS.map((estado) => ({ valor: estado, etiqueta: ESTADO_INFO[estado].label }));
+
+/** Query param que lleva el filtro de Estado en la URL, ej.
+ * `/despachos?estado=REVISION_DOC,CLASIFICACION`. Formato: valores
+ * separados por comas en UN solo param (también se aceptan repetidos,
+ * `?estado=A&estado=B`, por si alguien arma el link a mano). Así las
+ * métricas del Home pueden abrir el Explorador ya filtrado, y un refresh o
+ * el botón atrás conservan el filtro. Convive con `?tab=` de DespachoPage:
+ * solo se toca este param, nunca se reemplaza la query completa. */
+const PARAM_ESTADO = "estado";
+
+/** Lee `?estado=` y se queda solo con valores del enum (lo inválido se
+ * ignora en silencio); `null` = sin filtro, igual que en `ColumnFilter`. */
+function leerEstadosDeUrl(params: URLSearchParams): EstadoDespacho[] | null {
+  const crudos = params
+    .getAll(PARAM_ESTADO)
+    .flatMap((v) => v.split(","))
+    .map((v) => v.trim());
+  const validos = ORDEN_ESTADOS.filter((estado) => crudos.includes(estado));
+  return validos.length > 0 ? validos : null;
+}
 
 type Vista = "lista" | "cliente" | "estado";
 
@@ -72,7 +92,6 @@ interface Orden {
 export function ExploradorTab() {
   const [entradaBusqueda, setEntradaBusqueda] = useState("");
   const [busqueda, setBusqueda] = useState("");
-  const [estadosFiltro, setEstadosFiltro] = useState<EstadoDespacho[] | null>(null);
   const [clientesFiltro, setClientesFiltro] = useState<string[] | null>(null);
   const [gestoresFiltro, setGestoresFiltro] = useState<string[] | null>(null);
   const [orden, setOrden] = useState<Orden>({ campo: "fecha_creacion", direccion: "desc" });
@@ -80,6 +99,11 @@ export function ExploradorTab() {
   const [vista, setVista] = useState<Vista>("lista");
   const [dialogoAbierto, setDialogoAbierto] = useState(false);
   const navigate = useNavigate();
+  // El filtro de Estado vive en la URL (no en useState) para que un link
+  // externo -- las métricas del Home -- lo pueda fijar y para que no se
+  // desincronice si la URL cambia con el componente ya montado.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const estadosFiltro = useMemo(() => leerEstadosDeUrl(searchParams), [searchParams]);
 
   const { data: clientesDistintos } = useClientesDistintosDeDespachos();
   const opcionesCliente = (clientesDistintos ?? []).map((valor) => ({ valor, etiqueta: valor }));
@@ -114,7 +138,15 @@ export function ExploradorTab() {
   }
 
   function aplicarEstados(seleccion: string[] | null) {
-    setEstadosFiltro(seleccion as EstadoDespacho[] | null);
+    setSearchParams(
+      (prev) => {
+        const siguiente = new URLSearchParams(prev); // conserva `?tab=` y cualquier otro param
+        siguiente.delete(PARAM_ESTADO);
+        if (seleccion && seleccion.length > 0) siguiente.set(PARAM_ESTADO, seleccion.join(","));
+        return siguiente;
+      },
+      { replace: true }, // cambiar un filtro no merece una entrada nueva en el historial
+    );
     setPagina(1);
   }
 
@@ -281,7 +313,7 @@ export function ExploradorTab() {
                   <TableRow key={`divisor-${fila.clave}`} className="hover:bg-transparent">
                     <TableCell
                       colSpan={6}
-                      className="bg-surface py-2 text-xs font-bold uppercase tracking-wide text-texto-secundario"
+                      className="bg-surface py-2 text-[13px] font-semibold text-texto-secundario"
                     >
                       {fila.etiqueta} ({fila.cantidad})
                     </TableCell>
@@ -367,7 +399,7 @@ function FilaDespacho({ despacho, onAbrir }: { despacho: DespachoOut; onAbrir: (
       aria-label={`Abrir despacho ${despacho.numero_despacho}`}
       className="cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
     >
-      <TableCell className="whitespace-nowrap font-mono text-xs font-semibold">
+      <TableCell className="whitespace-nowrap font-mono text-sm font-semibold">
         {despacho.numero_despacho}
       </TableCell>
       <TableCell>{despacho.cliente}</TableCell>

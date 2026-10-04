@@ -2,6 +2,8 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { AlertTriangle, Check, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { NOMBRE_DOCUMENTO_CORTO } from "@/lib/documentos";
+import type { TipoDocumento } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -28,7 +30,7 @@ export interface ProcesamientoModalProps {
   /** Tipos de documento que se estan procesando esta vez (los que estaban
    * pendientes al presionar el boton), para dar contexto sin inventar un
    * nombre de archivo que esta accion no maneja de a uno. */
-  tiposEnProceso: string[];
+  tiposEnProceso: TipoDocumento[];
   /** Presente = el pipeline fallo; se muestra en vez de la barra de pasos,
    * con un boton para cerrar (mientras esta en curso, el modal no se
    * puede cerrar a mano -- no hay nada que cancelar del lado del backend). */
@@ -98,7 +100,7 @@ export function ProcesamientoModal({
               <div>
                 <h2 className="text-base font-semibold text-texto">Extracción y validación</h2>
                 {tiposEnProceso.length > 0 && (
-                  <p className="mt-1 text-sm text-texto-secundario">{tiposEnProceso.join(", ")}</p>
+                  <p className="mt-1 text-sm text-texto-secundario">{tiposEnProceso.map((tipo) => NOMBRE_DOCUMENTO_CORTO[tipo]).join(", ")}</p>
                 )}
               </div>
 
@@ -132,7 +134,7 @@ export function ProcesamientoModal({
                       </div>
                       <span
                         className={cn(
-                          "text-xs leading-tight",
+                          "text-[13px] leading-tight",
                           completado || activo ? "text-texto" : "text-texto-secundario",
                         )}
                       >
@@ -143,7 +145,7 @@ export function ProcesamientoModal({
                 })}
               </div>
 
-              <p className="text-xs text-texto-secundario">
+              <p className="text-[13px] text-texto-secundario">
                 Puede tardar más de un minuto según cuántos documentos haya que procesar.
               </p>
             </div>

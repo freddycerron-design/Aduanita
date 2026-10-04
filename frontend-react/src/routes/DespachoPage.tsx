@@ -17,7 +17,7 @@ const TABS_VALIDOS: TabValue[] = ["explorador", "revision", "clasificacion", "pr
 /**
  * Shell de la sección Validador: el Explorador (crear/buscar/listar
  * despachos, ver `ExploradorTab`) es la primera pestaña de la MISMA tira
- * que Revisión/Pre Clasificación/Pre-liquidación/Comunicaciones (antes
+ * que Revisión/Preclasificación/Preliquidación/Comunicaciones (antes
  * "Correo": ahora el borrador puede marcarse para enviarse por correo,
  * WhatsApp, o ambos, ver `ComunicacionesTab`) -- ya no un panel lateral
  * aparte. No hay un despacho "activo" hasta que se elige uno ahí (o se
@@ -74,12 +74,12 @@ export function DespachoPage() {
   return (
     <div className="flex h-full flex-col">
       {detalle ? (
-        <DespachoHeader despacho={detalle.despacho}>
+        <DespachoHeader detalle={detalle}>
           <ExportarDespachoBotones detalle={detalle} />
         </DespachoHeader>
       ) : (
         <div className="border-b border-border px-6 py-4">
-          <h1 className="text-lg font-semibold text-texto">Despachos</h1>
+          <h1 className="text-lg font-semibold text-texto">Validador</h1>
         </div>
       )}
       <div className="flex-1 overflow-y-auto p-6">
@@ -90,10 +90,10 @@ export function DespachoPage() {
               Revisión
             </TabsTrigger>
             <TabsTrigger value="clasificacion" disabled={!detalle}>
-              Pre Clasificación
+              Preclasificación
             </TabsTrigger>
             <TabsTrigger value="preliquidacion" disabled={!detalle}>
-              Pre liquidación
+              Preliquidación
             </TabsTrigger>
             <TabsTrigger value="comunicaciones" disabled={!detalle}>
               Comunicaciones

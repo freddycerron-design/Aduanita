@@ -171,7 +171,7 @@ export function ClienteForm({ open, onOpenChange, cliente }: ClienteFormProps) {
           </div>
 
           <div className="flex flex-col gap-4 border-t border-border pt-4">
-            <p className="text-xs font-bold uppercase tracking-wide text-texto-secundario">Dirección</p>
+            <p className="text-sm font-semibold text-texto">Dirección</p>
             <div className="flex flex-col gap-2">
               <Label htmlFor="importador-calle">Calle y número</Label>
               <Input id="importador-calle" placeholder="Av. Larco 123" {...register("direccion_calle")} />
@@ -193,7 +193,7 @@ export function ClienteForm({ open, onOpenChange, cliente }: ClienteFormProps) {
           </div>
 
           <div className="flex flex-col gap-4 border-t border-border pt-4">
-            <p className="text-xs font-bold uppercase tracking-wide text-texto-secundario">Contacto</p>
+            <p className="text-sm font-semibold text-texto">Contacto</p>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="flex flex-col gap-2 sm:col-span-2">
                 <Label htmlFor="importador-nombre-contacto">Nombre de contacto</Label>
