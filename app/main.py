@@ -358,6 +358,17 @@ class DocumentoExtraidoOut(BaseModel):
         (ver `_columnas_por_lista`)."""
         return _columnas_por_lista(self.tipo_documento)
 
+    @computed_field
+    @property
+    def estructura(self) -> dict:
+        """Cabecera y detalle del schema con etiquetas legibles y tipo de
+        dato (ver `_describir_campos`), en el orden del schema: el visor
+        dibuja con esto el documento como se ve en papel (cabecera en
+        grilla, items en tabla) sin mantener un diccionario de etiquetas
+        duplicado en el frontend."""
+        cabecera, detalle = _describir_campos(TIPO_A_SCHEMA[self.tipo_documento])
+        return {"cabecera": cabecera, "detalle": detalle}
+
 
 class ContenidoDocumentoUpdate(BaseModel):
     """Datos de un documento corregidos a mano por el especialista. El

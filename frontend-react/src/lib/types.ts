@@ -105,6 +105,9 @@ export interface DocumentoExtraidoOut {
    * schema del backend: sin esto el formulario de correccion no podria
    * agregar la primera fila a una lista que llego vacia. */
   columnas_por_lista: Record<string, string[]>;
+  /** Campos del schema en orden, con etiqueta legible y tipo de dato --
+   * con esto el visor arma la cabecera en grilla y el detalle en tabla. */
+  estructura: EstructuraDocumento;
   /** Cuando se corrigio a mano por ultima vez; null si el contenido es
    * tal cual lo extrajo el modelo. */
   editado_en: string | null;

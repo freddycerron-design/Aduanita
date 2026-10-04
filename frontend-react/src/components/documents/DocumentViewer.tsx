@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileJson, Image as ImageIcon, Pencil } from "lucide-react";
+import { ClipboardList, Image as ImageIcon, Pencil } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { puedeCorregirDatosExtraidos } from "@/lib/roles";
@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DocumentContentForm } from "@/components/documents/DocumentContentForm";
 
-type ModoVisor = "JSON" | "ORIGINAL";
+type ModoVisor = "DATOS" | "ORIGINAL";
 
 export interface DocumentViewerProps {
   idDespacho: string;
@@ -43,8 +43,8 @@ const CONFIANZA_INFO: Record<NivelConfianza, { label: string; variante: "verde" 
  * reemplaza al mas antiguo) + comparacion lado a lado. Con 1 seleccionado
  * se ve una sola ventana a ancho completo; con 2, dos ventanas una al
  * costado de la otra para que el usuario compare visualmente (cada una
- * con su propio toggle JSON/PDF independiente -- se puede comparar PDF
- * contra PDF, JSON contra JSON, o cruzado).
+ * con su propio toggle Datos/Original independiente -- se puede comparar PDF
+ * contra PDF, datos contra datos, o cruzado).
  */
 export function DocumentViewer({ idDespacho, estadoDespacho, documentos }: DocumentViewerProps) {
   const disponibles = TIPOS_DOCUMENTO.filter((tipo) => documentos.some((d) => d.tipo_documento === tipo));
@@ -122,7 +122,7 @@ export function DocumentViewer({ idDespacho, estadoDespacho, documentos }: Docum
 }
 
 /** Una ventana individual del visor: encabezado con el tipo + toggle
- * JSON/original propio, y el contenido segun el modo elegido. El
+ * Datos/Original propio, y el contenido segun el modo elegido. El
  * "original" puede ser un PDF o una foto (JPG/PNG/WEBP/HEIC) -- se
  * distingue por la extension del path guardado para elegir entre
  * <iframe> (PDF) e <img> (imagen) al mostrarlo.
@@ -141,7 +141,7 @@ function DocumentPane({
   idDespacho: string;
   estadoDespacho: EstadoDespacho;
 }) {
-  const [modo, setModo] = useState<ModoVisor>("JSON");
+  const [modo, setModo] = useState<ModoVisor>("DATOS");
   const [editando, setEditando] = useState(false);
   const { data: perfil } = useProfile();
   const actualizar = useActualizarContenidoDocumento(idDespacho);
@@ -182,10 +182,10 @@ function DocumentPane({
           <Button
             type="button"
             size="sm"
-            variant={modo === "JSON" ? "primary" : "outline"}
-            onClick={() => setModo("JSON")}
+            variant={modo === "DATOS" ? "primary" : "outline"}
+            onClick={() => setModo("DATOS")}
           >
-            <FileJson />
+            <ClipboardList />
             Datos
           </Button>
           <Button
@@ -204,7 +204,7 @@ function DocumentPane({
           a proposito: `hidden` y `flex` pelean por la misma propiedad
           `display`, y cual gana dependeria del orden en que Tailwind emita
           sus utilidades, no del orden de las clases. */}
-      <div className={cn(modo !== "JSON" && "hidden")}>
+      <div className={cn(modo !== "DATOS" && "hidden")}>
         <div className="flex flex-col gap-2">
           {documento.procesado ? (
             <>
@@ -228,7 +228,15 @@ function DocumentPane({
               {documento.campos_inciertos.length > 0 && !editando && (
                 <p className="rounded-lg border border-amber/40 bg-amber/10 p-3 text-[13px] text-amber">
                   El modelo no leyó con seguridad:{" "}
-                  {documento.campos_inciertos.map((campo) => campo.replace(/_/g, " ")).join(", ")}.
+                  {documento.campos_inciertos
+                    .map(
+                      (campo) =>
+                        [...documento.estructura.cabecera, ...documento.estructura.detalle].find(
+                          (c) => c.campo === campo,
+                        )?.etiqueta ?? campo.replace(/_/g, " "),
+                    )
+                    .join(", ")}
+                  .
                   Compáralos con el original antes de continuar.
                 </p>
               )}
@@ -238,6 +246,7 @@ function DocumentPane({
                   contenido={documento.contenido_json}
                   camposInciertos={documento.campos_inciertos}
                   columnasPorLista={documento.columnas_por_lista}
+                  estructura={documento.estructura}
                   guardando={actualizar.isPending}
                   onCancelar={() => setEditando(false)}
                   onGuardar={(contenidoJson) =>
@@ -248,9 +257,13 @@ function DocumentPane({
                   }
                 />
               ) : (
-                <pre className="max-h-[480px] overflow-auto rounded-xl border border-border bg-surface p-4 text-xs text-texto">
-                  {JSON.stringify(documento.contenido_json, null, 2)}
-                </pre>
+                <DocumentContentForm
+                    soloLectura
+                    contenido={documento.contenido_json}
+                    camposInciertos={documento.campos_inciertos}
+                    columnasPorLista={documento.columnas_por_lista}
+                    estructura={documento.estructura}
+                  />
               )}
             </>
           ) : (
