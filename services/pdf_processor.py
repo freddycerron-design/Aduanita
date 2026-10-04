@@ -44,7 +44,7 @@ import pymupdf as fitz  # "fitz" es el alias historico de PyMuPDF; el import mod
 from google.genai import types
 from pydantic import BaseModel, Field, create_model
 
-from app.config import GEMINI_MODEL_TEXTO_Y_VISION, get_genai_client
+from app.config import generar_contenido_gemini
 
 TipoDocumento = Literal["FACTURA", "SEGURO", "SWIFT_BANCARIO", "BL", "PACKING_LIST"]
 NivelConfianza = Literal["ALTA", "MEDIA", "BAJA"]
@@ -459,11 +459,9 @@ def _generar_structured_output(contenidos: list, schema: Type[BaseModel]) -> dic
     `response.text`, por eso se parsea manualmente en vez de depender de
     `response.parsed`.
     """
-    cliente = get_genai_client()
-    respuesta = cliente.models.generate_content(
-        model=GEMINI_MODEL_TEXTO_Y_VISION,
-        contents=contenidos,
-        config=types.GenerateContentConfig(
+    respuesta = generar_contenido_gemini(
+        contenidos,
+        types.GenerateContentConfig(
             response_mime_type="application/json",
             response_json_schema=schema.model_json_schema(),
         ),

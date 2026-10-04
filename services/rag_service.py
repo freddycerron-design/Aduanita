@@ -17,7 +17,7 @@ from google.genai import types
 from pydantic import BaseModel
 from supabase import Client
 
-from app.config import EMBEDDING_DIMENSIONS, GEMINI_MODEL_EMBEDDINGS, get_genai_client
+from app.config import EMBEDDING_DIMENSIONS, get_genai_client, get_settings
 
 TipoAccion = Literal["APROBADO", "EDITADO"]
 
@@ -54,7 +54,7 @@ def generar_embedding(texto: str) -> list[float]:
     """
     cliente = get_genai_client()
     respuesta = cliente.models.embed_content(
-        model=GEMINI_MODEL_EMBEDDINGS,
+        model=get_settings().gemini_model_embeddings,
         contents=texto,
         config=types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMENSIONS),
     )

@@ -107,9 +107,11 @@ módulo por responsabilidad:
 `app/config.py` es el único lugar que lee `.env`; expone factories cacheadas
 (`get_supabase_admin_client`, `get_supabase_user_client`, `get_genai_client`) que tanto `app/main.py`
 como cada módulo de `services/*.py` importan desde ahí. Los nombres de los modelos de Gemini también
-están centralizados ahí (`GEMINI_MODEL_TEXTO_Y_VISION`, `GEMINI_MODEL_EMBEDDINGS`) — verificar contra la
-API real antes de cambiarlos, Google ya retiró antes nombres de modelo de los que este proyecto
-dependía.
+están ahí, como variables de entorno con valor por defecto en `Settings` (`GEMINI_MODEL_TEXTO_Y_VISION`,
+`GEMINI_MODELS_RESPALDO`, `GEMINI_MODEL_EMBEDDINGS`) — verificar contra la API real antes de cambiarlos,
+Google ya retiró antes nombres de modelo de los que este proyecto dependía. Toda llamada de texto/visión
+pasa por `generar_contenido_gemini`, que reintenta con los modelos de respaldo ante 404/429/5xx; los
+embeddings no tienen respaldo a propósito (otro modelo da vectores incompatibles con los guardados).
 
 ### Máquina de estados del despacho
 

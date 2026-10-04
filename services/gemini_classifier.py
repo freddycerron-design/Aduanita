@@ -11,7 +11,7 @@ import re
 from google.genai import types
 from pydantic import BaseModel, Field
 
-from app.config import GEMINI_MODEL_TEXTO_Y_VISION, get_genai_client
+from app.config import generar_contenido_gemini
 from services.arancel_service import SubpartidaCandidata
 # NivelConfianza y sus umbrales viven en pdf_processor porque los comparten
 # las dos confianzas que ve el especialista (la de la lectura de cada
@@ -169,11 +169,9 @@ def clasificar(
     # soportado por la version vigente del SDK (google-genai 2.20.0,
     # verificado agosto 2026). La respuesta llega como JSON en
     # response.text y se valida manualmente contra el schema Pydantic.
-    cliente = get_genai_client()
-    respuesta = cliente.models.generate_content(
-        model=GEMINI_MODEL_TEXTO_Y_VISION,
-        contents=[prompt],
-        config=types.GenerateContentConfig(
+    respuesta = generar_contenido_gemini(
+        [prompt],
+        types.GenerateContentConfig(
             response_mime_type="application/json",
             response_json_schema=_PropuestaClasificacionIA.model_json_schema(),
         ),
