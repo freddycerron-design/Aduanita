@@ -160,8 +160,11 @@ type PestanaArancel = "buscar" | "favoritos";
 export function ArancelPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const pestana: PestanaArancel = searchParams.get("tab") === "favoritos" ? "favoritos" : "buscar";
-  const [entrada, setEntrada] = useState("");
-  const [consulta, setConsulta] = useState("");
+  // La búsqueda vive en `?q=`: así otra pantalla puede abrir esta ya
+  // buscando (ej. "Buscar en aranceles" desde la preclasificación) y el
+  // botón atrás vuelve al resultado anterior.
+  const consulta = searchParams.get("q") ?? "";
+  const [entrada, setEntrada] = useState(consulta);
   const [partidaSunat, setPartidaSunat] = useState<SubpartidaArancelaria | null>(null);
   const { data: resultados, isFetching, isError, error } = useBuscarArancel(consulta);
   const { data: favoritas, isLoading: favoritasCargando, isError: favoritasError } = usePartidasFavoritas();
@@ -175,7 +178,12 @@ export function ArancelPage() {
 
   function buscar(evento: FormEvent<HTMLFormElement>) {
     evento.preventDefault();
-    setConsulta(entrada);
+    setSearchParams((prev) => {
+      const siguiente = new URLSearchParams(prev);
+      siguiente.set("q", entrada.trim());
+      siguiente.delete("tab");
+      return siguiente;
+    });
   }
 
   function alternarFavorito(partida: SubpartidaArancelaria, marcar: boolean) {

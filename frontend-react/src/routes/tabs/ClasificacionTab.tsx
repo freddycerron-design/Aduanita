@@ -104,21 +104,28 @@ export function ClasificacionTab({
     const aprobada = decision?.tipo_accion === "APROBADO";
     return (
       <div className="flex flex-col gap-4">
-        {clasificacion ? (
+        {/* La decisión del liquidador es la fuente de verdad de un despacho
+            cerrado; la propuesta de la IA (que ahora queda guardada) se
+            muestra solo como referencia cuando el liquidador la cambió. */}
+        {decision ? (
+          <ClassificationHero
+            subpartida={decision.subpartida_final_humano}
+            confianza={aprobada ? "ALTA" : "BAJA"}
+            etiquetaSecundaria={ETIQUETA_TIPO_ACCION[decision.tipo_accion]}
+            titulo="Subpartida final"
+            sustentoLegal={
+              !aprobada && clasificacion && clasificacion.subpartida_sugerida !== decision.subpartida_final_humano
+                ? `Decidida por el liquidador. La IA había propuesto ${clasificacion.subpartida_sugerida}.`
+                : "Subpartida final decidida por el liquidador."
+            }
+          />
+        ) : clasificacion ? (
           <ClassificationHero
             subpartida={clasificacion.subpartida_sugerida}
             confianza={clasificacion.nivel_confianza}
             scoreConfianza={clasificacion.score_confianza}
             sustentoLabel="Sustento legal (RGI):"
             sustentoLegal={clasificacion.sustento_legal_rgi}
-          />
-        ) : decision ? (
-          <ClassificationHero
-            subpartida={decision.subpartida_final_humano}
-            confianza={aprobada ? "ALTA" : "BAJA"}
-            etiquetaSecundaria={ETIQUETA_TIPO_ACCION[decision.tipo_accion]}
-            titulo="Subpartida final"
-            sustentoLegal="Subpartida final decidida por el liquidador."
           />
         ) : (
           <Aviso tono="info">No hay información de clasificación disponible para este despacho.</Aviso>
@@ -144,8 +151,8 @@ export function ClasificacionTab({
     return (
       <div className="flex flex-col gap-4">
         <Aviso tono="advertencia">
-          No se encontró la propuesta de clasificación en memoria (puede pasar si el backend se reinició).
-          Vuelve a enviar el despacho a clasificación.
+          Este despacho no tiene una propuesta de clasificación guardada (se envió a clasificación antes de que
+          las propuestas se guardaran). Genera una nueva para continuar.
         </Aviso>
         {puedeEnviarAClasificacion(perfil?.rol) && (
           <div>

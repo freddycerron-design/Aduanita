@@ -813,3 +813,36 @@ alter table public.partidas_favoritas enable row level security;
 
 create policy "select_partidas_favoritas" on public.partidas_favoritas
     for select using (id_usuario = (select auth.uid()));
+
+
+-- ---------------------------------------------------------------------
+-- 17. propuestas_clasificacion
+-- ---------------------------------------------------------------------
+-- Propuesta de clasificacion vigente de cada despacho (la ultima que
+-- genero "Extraccion y validacion"). Antes vivia solo en la memoria del
+-- proceso del backend y se perdia cada vez que Render reiniciaba el
+-- servicio, dejando el despacho en CLASIFICACION sin propuesta. Una fila
+-- por despacho (se reemplaza al reprocesar). No se borra al decidir: queda
+-- como registro de lo que propuso la IA, junto a la decision humana en
+-- historial_clasificaciones.
+create table public.propuestas_clasificacion (
+    id_despacho                uuid primary key references public.despachos(id) on delete cascade,
+    subpartida_sugerida        text not null,
+    score_confianza            double precision not null,
+    nivel_confianza            text not null check (nivel_confianza in ('ALTA', 'MEDIA', 'BAJA')),
+    informacion_faltante_alert jsonb not null default '[]'::jsonb,
+    sustento_legal_rgi         text not null,
+    -- Si la factura traia informacion suficiente para clasificar: lo usa
+    -- el borrador de comunicacion para pedir los datos que faltan.
+    info_suficiente            boolean not null default false,
+    generado_en                timestamptz not null default now()
+);
+
+comment on table public.propuestas_clasificacion is
+    'Propuesta de subpartida generada por la IA para cada despacho (la vigente). '
+    'La decision del liquidador se registra aparte en historial_clasificaciones.';
+
+alter table public.propuestas_clasificacion enable row level security;
+
+create policy "select_propuestas_clasificacion" on public.propuestas_clasificacion
+    for select using (public.es_personal_interno());

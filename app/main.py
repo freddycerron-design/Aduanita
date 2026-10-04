@@ -134,18 +134,35 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------
-# Cache en memoria del proceso para la propuesta de clasificacion vigente
-# de cada despacho.
-#
-# No se persiste en su propia tabla hasta que el especialista aprueba o
-# corrige (paso en el que si queda guardada en `historial_clasificaciones`,
-# ver POST /despachos/{id}/decision). Limitacion conocida del MVP: esta
-# cache es por proceso, por lo que solo funciona corriendo un unico
-# worker de Uvicorn (adecuado para desarrollo/demo, no para produccion
-# con multiples workers/replicas).
+# Propuesta de clasificacion vigente de cada despacho, persistida en
+# `propuestas_clasificacion` (una fila por despacho). Antes era una cache
+# en memoria del proceso y se perdia en cada reinicio de Render.
 # ---------------------------------------------------------------------
-_cache_clasificaciones: dict[str, PropuestaClasificacion] = {}
-_cache_info_suficiente: dict[str, bool] = {}
+def _guardar_propuesta_clasificacion(
+    admin: Client, id_despacho: str, propuesta: PropuestaClasificacion, info_suficiente: bool
+) -> None:
+    admin.table("propuestas_clasificacion").upsert(
+        {
+            "id_despacho": id_despacho,
+            **propuesta.model_dump(),
+            "info_suficiente": info_suficiente,
+            "generado_en": datetime.now(timezone.utc).isoformat(),
+        },
+        on_conflict="id_despacho",
+    ).execute()
+
+
+def _obtener_propuesta_clasificacion(
+    admin: Client, id_despacho: str
+) -> tuple[PropuestaClasificacion | None, bool]:
+    """(propuesta, info_suficiente); (None, False) si nunca se clasifico."""
+    respuesta = (
+        admin.table("propuestas_clasificacion").select("*").eq("id_despacho", id_despacho).execute()
+    )
+    if not respuesta.data:
+        return None, False
+    fila = respuesta.data[0]
+    return PropuestaClasificacion.model_validate(fila), bool(fila.get("info_suficiente"))
 
 
 def _ahora_iso() -> str:
@@ -722,7 +739,7 @@ def _obtener_subpartida_vigente(admin: Client, id_despacho: str) -> str | None:
     if decision_respuesta.data:
         return decision_respuesta.data[0]["subpartida_final_humano"]
 
-    clasificacion = _cache_clasificaciones.get(id_despacho)
+    clasificacion, _ = _obtener_propuesta_clasificacion(admin, id_despacho)
     return clasificacion.subpartida_sugerida if clasificacion else None
 
 
@@ -911,8 +928,7 @@ def _ejecutar_clasificacion(admin: Client, id_despacho: str) -> PropuestaClasifi
     candidatas_arancel = buscar_subpartidas_candidatas(admin, factura.descripcion_mercancia)
     propuesta = clasificar(factura.descripcion_mercancia, factura.items, antecedentes, candidatas_arancel)
 
-    _cache_clasificaciones[id_despacho] = propuesta
-    _cache_info_suficiente[id_despacho] = info_suficiente
+    _guardar_propuesta_clasificacion(admin, id_despacho, propuesta, info_suficiente)
     # El cambio de estado a CLASIFICACION lo hace el endpoint
     # enviar-a-clasificacion (una accion aparte, ver mas abajo) -- este
     # paso (llamado por procesar-informacion) nunca toca el estado.
@@ -921,7 +937,8 @@ def _ejecutar_clasificacion(admin: Client, id_despacho: str) -> PropuestaClasifi
 
 
 def _ejecutar_generacion_borrador(admin: Client, id_despacho: str) -> dict:
-    if id_despacho not in _cache_clasificaciones:
+    clasificacion, info_suficiente = _obtener_propuesta_clasificacion(admin, id_despacho)
+    if clasificacion is None:
         raise HTTPException(
             status_code=400,
             detail="Debe ejecutar POST /despachos/{id}/clasificar antes de generar el borrador de correo.",
@@ -929,8 +946,6 @@ def _ejecutar_generacion_borrador(admin: Client, id_despacho: str) -> dict:
 
     despacho = _obtener_despacho_o_404(admin, id_despacho)
     validaciones = _obtener_validaciones(admin, id_despacho)
-    clasificacion = _cache_clasificaciones[id_despacho]
-    info_suficiente = _cache_info_suficiente.get(id_despacho, False)
 
     borrador = generar_borrador(
         DespachoInfo(numero_despacho=despacho["numero_despacho"], cliente=despacho["cliente"]),
@@ -1363,7 +1378,7 @@ def _armar_detalle_despacho(admin: Client, id_despacho: str) -> dict:
     despacho = _obtener_despacho_o_404(admin, id_despacho)
     documentos = _obtener_documentos_extraidos(admin, id_despacho)
     validaciones = _obtener_validaciones(admin, id_despacho)
-    clasificacion = _cache_clasificaciones.get(id_despacho)
+    clasificacion, _ = _obtener_propuesta_clasificacion(admin, id_despacho)
 
     borrador_respuesta = (
         admin.table("borradores_correo")
@@ -1804,8 +1819,7 @@ def registrar_decision(
     # OBSERVADO -- esa distincion queda registrada en tipo_accion_rag
     # (historial_clasificaciones.tipo_accion), no en el estado del despacho.
     _actualizar_estado_despacho(admin, id_despacho, "FINALIZADO")
-    _cache_clasificaciones.pop(id_despacho, None)
-    _cache_info_suficiente.pop(id_despacho, None)
+    # La propuesta NO se borra: queda como registro de lo que propuso la IA.
 
     return fila_creada
 
