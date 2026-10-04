@@ -58,7 +58,7 @@ export function SunatGravamenesDialog({ partida, onClose }: SunatGravamenesDialo
 
   return (
     <Dialog open={partida !== null} onOpenChange={(abierto) => !abierto && onClose()}>
-      <DialogContent className="flex max-h-[90vh] w-[calc(100%-2rem)] max-w-5xl flex-col">
+      <DialogContent className="flex max-h-[90vh] w-[calc(100%-2rem)] max-w-6xl flex-col">
         <DialogHeader>
           <DialogTitle className="flex flex-wrap items-center gap-x-3 gap-y-1 pr-8">
             <span className="font-mono text-xl tracking-tight">{codigo}</span>
@@ -91,7 +91,7 @@ export function SunatGravamenesDialog({ partida, onClose }: SunatGravamenesDialo
             <div className="flex flex-col gap-5">
               {data.ubicacion && <Encabezados ubicacion={data.ubicacion} />}
 
-              <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
+              <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_23rem]">
                 {data.ubicacion ? (
                   <Nomenclatura lineas={data.ubicacion.lineas} onConsultar={setCodigoNavegado} />
                 ) : (
@@ -115,7 +115,7 @@ export function SunatGravamenesDialog({ partida, onClose }: SunatGravamenesDialo
                         {data.gravamenes.map((g) => (
                           <TableRow key={g.concepto}>
                             <TableCell className="py-2 text-[13px]">{g.concepto}</TableCell>
-                            <TableCell className="py-2 text-right text-sm font-medium tabular-nums">
+                            <TableCell className="whitespace-nowrap py-2 text-right text-sm font-medium tabular-nums">
                               {g.valor}
                             </TableCell>
                           </TableRow>
@@ -203,7 +203,7 @@ function Nomenclatura({
       <h3 id="titulo-nomenclatura" className="text-sm font-semibold text-texto">
         Ubicación en el arancel
       </h3>
-      <ol className="max-h-[50vh] overflow-y-auto rounded-lg border border-border py-1">
+      <ol className="max-h-[42vh] overflow-y-auto rounded-lg border border-border py-1">
         {lineas.map((linea, indice) => (
           <FilaNomenclatura
             key={`${linea.codigo ?? "texto"}-${indice}`}
