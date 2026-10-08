@@ -263,9 +263,9 @@ function TablaResultado({ resultado }: { resultado: PreliquidacionOut }) {
 
   return (
     <div className="flex flex-col gap-3">
-      {/* El tipo de cambio va en la misma línea que el título, a la
-          izquierda: se lee antes de mirar la columna en soles. */}
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+      {/* El tipo de cambio va en la misma línea que el título, alineado
+          a la derecha (sobre la columna en soles, que es donde se usa). */}
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h2 className="text-sm font-semibold text-texto">Resultado</h2>
         {mensajeTipoCambio}
       </div>
