@@ -15,6 +15,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 export interface PreliquidacionTabProps {
   idDespacho: string;
   documentos: DocumentoExtraidoOut[];
+  /** Despacho finalizado: se muestra el último cálculo, sin recalcular. */
+  soloLectura?: boolean;
 }
 
 /** Estima un Valor CIF de partida a partir de los documentos ya cargados,
@@ -47,7 +49,7 @@ function sugerirValorCif(documentos: DocumentoExtraidoOut[]): number | null {
  * sugerencia precalculada (ver `sugerirValorCif`) -- no se calcula 100%
  * solo porque ningún documento trae un campo de flete todavía.
  */
-export function PreliquidacionTab({ idDespacho, documentos }: PreliquidacionTabProps) {
+export function PreliquidacionTab({ idDespacho, documentos, soloLectura = false }: PreliquidacionTabProps) {
   const { data: perfil } = useProfile();
   const { data, isLoading, isError, error } = usePreliquidacion(idDespacho);
   const calcular = useCalcularPreliquidacion(idDespacho);
@@ -129,7 +131,13 @@ export function PreliquidacionTab({ idDespacho, documentos }: PreliquidacionTabP
           </p>
         </div>
 
-        {puedeCalcular ? (
+        {soloLectura ? (
+          <p className="text-sm text-texto-secundario">
+            {resultado
+              ? "Despacho finalizado: este es el último cálculo y ya no se puede recalcular."
+              : "Despacho finalizado sin preliquidación calculada."}
+          </p>
+        ) : puedeCalcular ? (
           <form
             onSubmit={manejarSubmit}
             className="flex flex-wrap items-end gap-4 rounded-xl border border-border bg-card p-5"

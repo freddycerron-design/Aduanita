@@ -1,3 +1,4 @@
+import { Lock } from "lucide-react";
 import { useParams, useSearchParams } from "react-router-dom";
 
 import { useDespachoDetalle } from "@/hooks/useDespachoDetalle";
@@ -71,6 +72,11 @@ export function DespachoPage() {
     );
   }
 
+  // Un despacho cerrado es de solo lectura (el backend responde 409 a
+  // cualquier modificacion, ver _exigir_despacho_editable): acá solo se
+  // ocultan o desactivan las acciones para no ofrecer algo que va a fallar.
+  const finalizado = detalle?.despacho.estado === "FINALIZADO";
+
   return (
     <div className="flex h-full flex-col">
       {detalle ? (
@@ -83,6 +89,12 @@ export function DespachoPage() {
         </div>
       )}
       <div className="flex-1 overflow-y-auto p-6">
+        {finalizado && (
+          <p className="mb-4 flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2.5 text-[13px] text-texto-secundario">
+            <Lock className="size-4 shrink-0" aria-hidden="true" />
+            Despacho finalizado: puedes consultarlo y exportarlo, pero ya no se puede modificar.
+          </p>
+        )}
         <Tabs value={tabActivo} onValueChange={(valor) => irATab(valor as TabValue)}>
           <TabsList>
             <TabsTrigger value="explorador">Explorador</TabsTrigger>
@@ -128,11 +140,15 @@ export function DespachoPage() {
               </TabsContent>
 
               <TabsContent value="preliquidacion">
-                <PreliquidacionTab idDespacho={detalle.despacho.id} documentos={detalle.documentos} />
+                <PreliquidacionTab
+                  idDespacho={detalle.despacho.id}
+                  documentos={detalle.documentos}
+                  soloLectura={finalizado}
+                />
               </TabsContent>
 
               <TabsContent value="comunicaciones">
-                <ComunicacionesTab borrador={detalle.borrador} />
+                <ComunicacionesTab borrador={detalle.borrador} soloLectura={finalizado} />
               </TabsContent>
             </>
           )}

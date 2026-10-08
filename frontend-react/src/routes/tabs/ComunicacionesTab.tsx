@@ -3,6 +3,8 @@ import type { BorradorCorreoOut } from "@/lib/types";
 
 export interface ComunicacionesTabProps {
   borrador: BorradorCorreoOut | null;
+  /** Despacho finalizado: el borrador se puede leer y copiar, no editar. */
+  soloLectura?: boolean;
 }
 
 /**
@@ -12,7 +14,7 @@ export interface ComunicacionesTabProps {
  * siendo solo un borrador: nada se envía automáticamente por ningún
  * canal, el especialista lo copia a mano.
  */
-export function ComunicacionesTab({ borrador }: ComunicacionesTabProps) {
+export function ComunicacionesTab({ borrador, soloLectura = false }: ComunicacionesTabProps) {
   if (!borrador) {
     return (
       <div className="rounded-2xl border border-border bg-card p-4 text-sm text-texto-secundario">
@@ -25,5 +27,5 @@ export function ComunicacionesTab({ borrador }: ComunicacionesTabProps) {
   // cambiar de despacho (no usa key={id} en el <Route>), asi que sin esto
   // el estado local del textarea de EmailDraftEditor quedaria pisado con
   // el borrador del despacho anterior al navegar entre despachos.
-  return <EmailDraftEditor key={borrador.id} borrador={borrador} />;
+  return <EmailDraftEditor key={borrador.id} borrador={borrador} soloLectura={soloLectura} />;
 }

@@ -248,7 +248,7 @@ export function RevisionTab({
               idDespacho={idDespacho}
               tipo={tipo}
               documento={documentos.find((d) => d.tipo_documento === tipo)}
-              disabled={ocupado}
+              disabled={ocupado || estadoDespacho === "FINALIZADO"}
             />
           ))}
         </div>

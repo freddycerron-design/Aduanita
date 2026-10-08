@@ -1578,6 +1578,22 @@ def _tasas_para_subpartida(subpartida: str, ad_valorem_local: float) -> dict:
     }
 
 
+def _exigir_despacho_editable(despacho: dict) -> dict:
+    """409 si el despacho ya esta FINALIZADO. Un despacho cerrado tiene su
+    decision registrada (historial_clasificaciones) y todo lo demas --
+    documentos, datos extraidos, hallazgos, propuesta, preliquidacion y
+    borrador -- es el registro de con que se decidio: modificarlo despues
+    reescribiria esa historia. Se aplica en TODO endpoint que escribe sobre
+    un despacho; el frontend ademas oculta esas acciones, pero la barrera
+    real es esta."""
+    if despacho["estado"] == "FINALIZADO":
+        raise HTTPException(
+            status_code=409,
+            detail="El despacho está finalizado: ya no se puede modificar.",
+        )
+    return despacho
+
+
 def _tipo_cambio_para_moneda(admin: Client, moneda: str) -> tuple[float | None, date | None]:
     """Tipo de cambio venta para pasar a soles los montos de la
     preliquidacion. SUNAT solo publica el del dolar: USD usa el vigente de
@@ -1608,7 +1624,7 @@ def calcular_preliquidacion_despacho(
     _requiere_rol(usuario, {"GESTOR", "LIQUIDADOR"})
 
     admin = get_supabase_admin_client()
-    _obtener_despacho_o_404(admin, id_despacho)
+    _exigir_despacho_editable(_obtener_despacho_o_404(admin, id_despacho))
 
     subpartida = _obtener_subpartida_vigente(admin, id_despacho)
     if not subpartida:
@@ -1687,7 +1703,7 @@ def subir_documento(
     binaria, no por la extension del nombre ni el Content-Type del
     navegador -- ver `pdf_processor.detectar_tipo_contenido`."""
     admin = get_supabase_admin_client()
-    _obtener_despacho_o_404(admin, id_despacho)  # 404 si el despacho no existe
+    _exigir_despacho_editable(_obtener_despacho_o_404(admin, id_despacho))  # 404 si el despacho no existe
 
     if tipo_documento not in TIPO_A_SCHEMA:
         raise HTTPException(status_code=400, detail=f"tipo_documento invalido: {tipo_documento}")
@@ -1755,7 +1771,7 @@ def eliminar_documento(
     reemplazar un documento (subir uno nuevo del mismo tipo ya lo
     sobrescribe via upsert), pero permite quitarlo sin cargar otro."""
     admin = get_supabase_admin_client()
-    _obtener_despacho_o_404(admin, id_despacho)
+    _exigir_despacho_editable(_obtener_despacho_o_404(admin, id_despacho))
 
     # El path real depende de la extension del archivo subido (PDF, JPG,
     # PNG...), por eso se lee de la fila en vez de asumir ".pdf".
@@ -1813,16 +1829,7 @@ def actualizar_contenido_documento(
     _requiere_rol(usuario, {"GESTOR"})
 
     admin = get_supabase_admin_client()
-    despacho = _obtener_despacho_o_404(admin, id_despacho)
-
-    # Un despacho FINALIZADO ya tiene su decision registrada y sus hallazgos
-    # son el registro de lo que se reviso: re-ejecutar la validacion sobre
-    # el reescribiria esa historia.
-    if despacho["estado"] == "FINALIZADO":
-        raise HTTPException(
-            status_code=400,
-            detail="No se pueden corregir los datos de un despacho ya finalizado.",
-        )
+    _exigir_despacho_editable(_obtener_despacho_o_404(admin, id_despacho))
 
     filas = _obtener_documentos_extraidos(admin, id_despacho)
     fila = next((f for f in filas if f["tipo_documento"] == tipo_documento), None)
@@ -1872,7 +1879,7 @@ def actualizar_contenido_documento(
 @app.post("/despachos/{id_despacho}/validar", response_model=list[ResultadoValidacionOut])
 def validar_despacho(id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_staff)) -> list[dict]:
     admin = get_supabase_admin_client()
-    _obtener_despacho_o_404(admin, id_despacho)
+    _exigir_despacho_editable(_obtener_despacho_o_404(admin, id_despacho))
     resultados = _ejecutar_validacion(admin, id_despacho)
     return [r.model_dump() for r in resultados]
 
@@ -1880,7 +1887,7 @@ def validar_despacho(id_despacho: str, usuario: UsuarioAutenticado = Depends(get
 @app.post("/despachos/{id_despacho}/clasificar", response_model=PropuestaClasificacionOut)
 def clasificar_despacho(id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_staff)) -> dict:
     admin = get_supabase_admin_client()
-    _obtener_despacho_o_404(admin, id_despacho)
+    _exigir_despacho_editable(_obtener_despacho_o_404(admin, id_despacho))
     propuesta = _ejecutar_clasificacion(admin, id_despacho)
     return propuesta.model_dump()
 
@@ -1890,7 +1897,7 @@ def generar_borrador_despacho(
     id_despacho: str, usuario: UsuarioAutenticado = Depends(get_current_staff)
 ) -> dict:
     admin = get_supabase_admin_client()
-    _obtener_despacho_o_404(admin, id_despacho)
+    _exigir_despacho_editable(_obtener_despacho_o_404(admin, id_despacho))
     return _ejecutar_generacion_borrador(admin, id_despacho)
 
 
@@ -1904,6 +1911,12 @@ def editar_borrador(
         raise HTTPException(
             status_code=400, detail="Debes enviar cuerpo_editado, canal_envio, o ambos."
         )
+    admin = get_supabase_admin_client()
+    borrador = admin.table("borradores_correo").select("id_despacho").eq("id", id_borrador).execute().data
+    if not borrador:
+        raise HTTPException(status_code=404, detail="Borrador no encontrado.")
+    _exigir_despacho_editable(_obtener_despacho_o_404(admin, borrador[0]["id_despacho"]))
+
     cliente_usuario = get_supabase_user_client(usuario.access_token)
     actualizado = actualizar_borrador_editado(
         cliente_usuario, id_borrador, usuario.id, datos.cuerpo_editado, datos.canal_envio
@@ -1978,7 +1991,7 @@ def procesar_informacion(
     _requiere_rol(usuario, {"GESTOR"})
 
     admin = get_supabase_admin_client()
-    despacho = _obtener_despacho_o_404(admin, id_despacho)
+    despacho = _exigir_despacho_editable(_obtener_despacho_o_404(admin, id_despacho))
 
     _ejecutar_extraccion_pendiente(admin, id_despacho)
     validaciones = _ejecutar_validacion(admin, id_despacho)

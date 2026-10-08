@@ -10,6 +10,8 @@ import type { BorradorCorreoOut, CanalEnvio } from "@/lib/types";
 
 export interface EmailDraftEditorProps {
   borrador: BorradorCorreoOut;
+  /** Despacho finalizado: canal y texto quedan fijos (se puede copiar). */
+  soloLectura?: boolean;
 }
 
 const ETIQUETA_CANAL: Record<CanalEnvio, string> = {
@@ -37,7 +39,7 @@ const ETIQUETA_CANAL: Record<CanalEnvio, string> = {
  * una elección de una sola pieza, no texto que se pueda dejar a medio
  * escribir.
  */
-export function EmailDraftEditor({ borrador }: EmailDraftEditorProps) {
+export function EmailDraftEditor({ borrador, soloLectura = false }: EmailDraftEditorProps) {
   const valorInicial = borrador.cuerpo_editado ?? borrador.cuerpo;
   const [cuerpo, setCuerpo] = useState(valorInicial);
   const [ultimoGuardado, setUltimoGuardado] = useState(valorInicial);
@@ -80,13 +82,13 @@ export function EmailDraftEditor({ borrador }: EmailDraftEditorProps) {
       <div className="flex flex-col gap-2">
         <Label>¿Por dónde se va a enviar?</Label>
         <RadioGroup value={borrador.canal_envio} onValueChange={handleCambiarCanal}>
-          <RadioGroupItem value="CORREO" disabled={editarBorrador.isPending}>
+          <RadioGroupItem value="CORREO" disabled={soloLectura || editarBorrador.isPending}>
             Correo
           </RadioGroupItem>
-          <RadioGroupItem value="WHATSAPP" disabled={editarBorrador.isPending}>
+          <RadioGroupItem value="WHATSAPP" disabled={soloLectura || editarBorrador.isPending}>
             WhatsApp
           </RadioGroupItem>
-          <RadioGroupItem value="AMBOS" disabled={editarBorrador.isPending}>
+          <RadioGroupItem value="AMBOS" disabled={soloLectura || editarBorrador.isPending}>
             Ambos
           </RadioGroupItem>
         </RadioGroup>
@@ -105,6 +107,7 @@ export function EmailDraftEditor({ borrador }: EmailDraftEditorProps) {
         <Textarea
           value={cuerpo}
           onChange={(evento) => setCuerpo(evento.target.value)}
+          readOnly={soloLectura}
           rows={14}
           className="min-h-80 resize-y rounded-none border-0 leading-relaxed focus-visible:ring-0"
         />
@@ -114,11 +117,13 @@ export function EmailDraftEditor({ borrador }: EmailDraftEditorProps) {
         Este mensaje no se envía automáticamente: cópialo y envíalo desde tu correo o WhatsApp habitual.
       </p>
 
-      <div>
-        <Button type="button" onClick={handleGuardar} disabled={!hayCambios || editarBorrador.isPending}>
-          {editarBorrador.isPending ? "Guardando..." : "Guardar edición del borrador"}
-        </Button>
-      </div>
+      {!soloLectura && (
+        <div>
+          <Button type="button" onClick={handleGuardar} disabled={!hayCambios || editarBorrador.isPending}>
+            {editarBorrador.isPending ? "Guardando..." : "Guardar edición del borrador"}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
