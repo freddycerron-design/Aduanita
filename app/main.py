@@ -94,7 +94,7 @@ from services.email_draft_service import (
 )
 from services.export_service import generar_excel_despacho
 from services.gemini_classifier import PropuestaClasificacion, clasificar
-from services.preliquidacion_service import calcular_preliquidacion
+from services.preliquidacion_service import TASA_IGV_GENERAL, TASA_IPM_GENERAL, calcular_preliquidacion
 from services.tipo_cambio_service import (
     TipoCambioDia,
     TipoCambioSunatNoDisponibleError,
@@ -585,12 +585,20 @@ class PreliquidacionOut(BaseModel):
     moneda: str
     ad_valorem_tasa: float
     ad_valorem_monto: float
+    isc_tasa: float = 0
+    isc_monto: float = 0
+    isc_requiere_revision: bool = False
     base_igv_ipm: float
+    igv_tasa: float = 16
     igv_monto: float
+    ipm_tasa: float = 2
     ipm_monto: float
     antidumping_monto: float
     derecho_especifico_monto: float
     total_tributos: float
+    # SUNAT = tasas leidas en vivo; LOCAL = SUNAT no respondio (ver
+    # _tasas_para_subpartida).
+    fuente_tasas: Literal["SUNAT", "LOCAL"] = "LOCAL"
     # Tipo de cambio venta SUNAT con que se muestran los montos en soles
     # (ver _tipo_cambio_para_moneda); None = no hay conversion.
     tipo_cambio_venta: float | None = None
@@ -1494,6 +1502,64 @@ def obtener_preliquidacion(
     }
 
 
+def _porcentaje_sunat(valor: str | None) -> float | None:
+    """'15.5%' -> 15.5, 'No aplica' -> 0. None si no es un porcentaje (ej.
+    'Detalle': SUNAT lo informa como monto especifico en otra pagina)."""
+    if valor is None:
+        return None
+    if valor.strip().lower() == "no aplica":
+        return 0.0
+    texto = valor.strip().rstrip("%").replace(",", ".").strip()
+    try:
+        return float(texto)
+    except ValueError:
+        return None
+
+
+def _tasas_para_subpartida(subpartida: str, ad_valorem_local: float) -> dict:
+    """Tasas para la preliquidacion leidas en vivo de SUNAT (la misma
+    consulta de la ficha de Aranceles): ad valorem vigente, ISC, IGV e IPM
+    de ESA subpartida -- asi se respetan las exoneraciones (IGV 0%) y el
+    ISC. Si SUNAT no responde, el ad valorem del arancel 2022 cargado y las
+    tasas generales, marcado como fuente LOCAL para avisarlo en pantalla.
+
+    Un ISC que SUNAT informa como 'Detalle' (monto especifico, ej. por
+    litro) no se puede calcular aca: queda en 0 con isc_requiere_revision.
+    """
+    respaldo = {
+        "ad_valorem_tasa": ad_valorem_local,
+        "isc_tasa": 0.0,
+        "igv_tasa": TASA_IGV_GENERAL,
+        "ipm_tasa": TASA_IPM_GENERAL,
+        "isc_requiere_revision": False,
+        "fuente_tasas": "LOCAL",
+    }
+    try:
+        medidas = consultar_medidas_sunat(subpartida)
+    except SunatNoDisponibleError:
+        return respaldo
+    if medidas is None:
+        return respaldo
+
+    valores = {g.concepto: g.valor for g in medidas.gravamenes}
+    ad_valorem = _porcentaje_sunat(valores.get("Ad Valorem"))
+    igv = _porcentaje_sunat(valores.get("Impuesto General a las Ventas"))
+    ipm = _porcentaje_sunat(valores.get("Impuesto de Promoción Municipal"))
+    isc_texto = valores.get("Impuesto Selectivo al Consumo")
+    isc = _porcentaje_sunat(isc_texto)
+    if ad_valorem is None or igv is None or ipm is None:
+        # Formato inesperado: mejor las tasas conocidas que adivinar.
+        return respaldo
+    return {
+        "ad_valorem_tasa": ad_valorem,
+        "isc_tasa": isc if isc is not None else 0.0,
+        "igv_tasa": igv,
+        "ipm_tasa": ipm,
+        "isc_requiere_revision": isc_texto is not None and isc is None,
+        "fuente_tasas": "SUNAT",
+    }
+
+
 def _tipo_cambio_para_moneda(admin: Client, moneda: str) -> tuple[float | None, date | None]:
     """Tipo de cambio venta para pasar a soles los montos de la
     preliquidacion. SUNAT solo publica el del dolar: USD usa el vigente de
@@ -1554,9 +1620,14 @@ def calcular_preliquidacion_despacho(
 
     tipo_cambio_venta, fecha_tipo_cambio = _tipo_cambio_para_moneda(admin, datos.moneda)
 
+    tasas = _tasas_para_subpartida(subpartida, ad_valorem_tasa)
+
     resultado = calcular_preliquidacion(
         valor_cif=datos.valor_cif,
-        ad_valorem_tasa=ad_valorem_tasa,
+        ad_valorem_tasa=tasas["ad_valorem_tasa"],
+        igv_tasa=tasas["igv_tasa"],
+        ipm_tasa=tasas["ipm_tasa"],
+        isc_tasa=tasas["isc_tasa"],
         antidumping_monto=antidumping_monto,
         derecho_especifico_monto=derecho_especifico_monto,
     )
@@ -1569,6 +1640,8 @@ def calcular_preliquidacion_despacho(
         "actualizado_en": _ahora_iso(),
         "tipo_cambio_venta": tipo_cambio_venta,
         "fecha_tipo_cambio": fecha_tipo_cambio.isoformat() if fecha_tipo_cambio else None,
+        "isc_requiere_revision": tasas["isc_requiere_revision"],
+        "fuente_tasas": tasas["fuente_tasas"],
         **resultado.model_dump(),
     }
     respuesta = admin.table("preliquidaciones").upsert(fila, on_conflict="id_despacho").execute()

@@ -192,12 +192,21 @@ export interface PreliquidacionOut {
   moneda: string;
   ad_valorem_tasa: number;
   ad_valorem_monto: number;
+  isc_tasa: number;
+  isc_monto: number;
+  /** SUNAT informa el ISC como monto específico ("Detalle"): no se calculó. */
+  isc_requiere_revision: boolean;
   base_igv_ipm: number;
+  igv_tasa: number;
   igv_monto: number;
+  ipm_tasa: number;
   ipm_monto: number;
   antidumping_monto: number;
   derecho_especifico_monto: number;
   total_tributos: number;
+  /** SUNAT = tasas leídas en vivo al calcular; LOCAL = SUNAT no respondió
+   * (arancel 2022 + tasas generales). */
+  fuente_tasas: "SUNAT" | "LOCAL";
   /** Tipo de cambio venta SUNAT para mostrar los montos en soles; null =
    * sin conversión (moneda distinta de USD/PEN o sin tipo de cambio). */
   tipo_cambio_venta: number | null;

@@ -161,6 +161,23 @@ export function PreliquidacionTab({ idDespacho, documentos }: PreliquidacionTabP
       {resultado && (
         <section className="flex flex-col gap-3">
           <TablaResultado resultado={resultado} />
+          {resultado.fuente_tasas === "SUNAT" ? (
+            <p className="text-[13px] text-texto-secundario">
+              Ad valorem, ISC, IGV e IPM son los vigentes en SUNAT para la subpartida al momento del cálculo
+              {resultado.igv_tasa === 0 && " (mercancía exonerada de IGV e IPM)"}.
+            </p>
+          ) : (
+            <p className="rounded-xl border border-amber/40 bg-amber/10 px-4 py-3 text-[13px] leading-relaxed text-amber">
+              No se pudo consultar SUNAT al calcular: se usaron el ad valorem del arancel 2022 y las tasas generales
+              de IGV e IPM, sin revisar exoneraciones ni ISC. Vuelve a calcular para tomar las tasas vigentes.
+            </p>
+          )}
+          {resultado.isc_requiere_revision && (
+            <p className="rounded-xl border border-amber/40 bg-amber/10 px-4 py-3 text-[13px] leading-relaxed text-amber">
+              Esta subpartida tiene ISC con monto específico (por ejemplo, por litro o por grado alcohólico):
+              no está incluido en el total. Revísalo en la ficha de SUNAT y súmalo a mano.
+            </p>
+          )}
           <p className="rounded-xl border border-amber/40 bg-amber/10 px-4 py-3 text-[13px] leading-relaxed text-amber">
             Antidumping y derecho específico requieren verificación caso a caso (INDECOPI/MEF) -- los valores
             de arriba son sugerencias, no una tasa vigente garantizada.
@@ -233,13 +250,25 @@ function TablaResultado({ resultado }: { resultado: PreliquidacionOut }) {
   const tipoCambio = resultado.tipo_cambio_venta;
   const fechaCalculo = resultado.actualizado_en.slice(0, 10);
 
-  // `tasa` solo en los conceptos que se calculan como porcentaje.
-  const filas: { etiqueta: string; tasa?: number; valor: number; total?: boolean }[] = [
+  // `tasa` solo en los conceptos que se calculan como porcentaje; son las
+  // que se usaron al calcular (de SUNAT, ver `fuente_tasas`). El ISC solo
+  // aparece si aplica o si SUNAT lo informa como monto específico.
+  const mostrarIsc = resultado.isc_tasa > 0 || resultado.isc_requiere_revision;
+  const filas: { etiqueta: string; tasa?: number | string; valor: number; total?: boolean }[] = [
     { etiqueta: "Valor CIF", valor: resultado.valor_cif },
     { etiqueta: "Ad Valorem", tasa: resultado.ad_valorem_tasa, valor: resultado.ad_valorem_monto },
+    ...(mostrarIsc
+      ? [
+          {
+            etiqueta: "ISC",
+            tasa: resultado.isc_requiere_revision ? "Detalle" : resultado.isc_tasa,
+            valor: resultado.isc_monto,
+          },
+        ]
+      : []),
     { etiqueta: "Base IGV/IPM", valor: resultado.base_igv_ipm },
-    { etiqueta: "IGV", tasa: 16, valor: resultado.igv_monto },
-    { etiqueta: "IPM", tasa: 2, valor: resultado.ipm_monto },
+    { etiqueta: "IGV", tasa: resultado.igv_tasa, valor: resultado.igv_monto },
+    { etiqueta: "IPM", tasa: resultado.ipm_tasa, valor: resultado.ipm_monto },
     { etiqueta: "Antidumping", valor: resultado.antidumping_monto },
     { etiqueta: "Derecho específico", valor: resultado.derecho_especifico_monto },
     { etiqueta: "Total tributos", valor: resultado.total_tributos, total: true },
@@ -301,7 +330,7 @@ function TablaResultado({ resultado }: { resultado: PreliquidacionOut }) {
               >
                 <td className={fila.total ? "px-4 py-3" : "px-4 py-2.5 text-texto-secundario"}>{fila.etiqueta}</td>
                 <td className="px-4 py-2.5 text-right font-mono tabular-nums text-texto-secundario">
-                  {fila.tasa === undefined ? "" : `${fila.tasa}%`}
+                  {fila.tasa === undefined ? "" : typeof fila.tasa === "string" ? fila.tasa : `${fila.tasa}%`}
                 </td>
                 <td className="px-4 py-2.5 text-right font-mono tabular-nums text-texto">
                   {formatoMonto.format(fila.valor)}

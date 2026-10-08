@@ -676,6 +676,15 @@ create table public.preliquidaciones (
     antidumping_monto        numeric not null default 0,
     derecho_especifico_monto numeric not null default 0,
     total_tributos           numeric not null,
+    -- Tasas usadas en el calculo (snapshot). Se leen en vivo de SUNAT al
+    -- calcular (fuente_tasas = 'SUNAT'); si SUNAT no responde se usan el
+    -- ad valorem del arancel 2022 y las tasas generales ('LOCAL').
+    igv_tasa                 numeric not null default 16,
+    ipm_tasa                 numeric not null default 2,
+    isc_tasa                 numeric not null default 0,
+    isc_monto                numeric not null default 0,
+    isc_requiere_revision    boolean not null default false,
+    fuente_tasas             text not null default 'LOCAL' check (fuente_tasas in ('SUNAT', 'LOCAL')),
     actualizado_por          uuid references public.perfiles_especialista(id),
     actualizado_en           timestamptz not null default now()
 );
@@ -906,3 +915,13 @@ comment on column public.preliquidaciones.tipo_cambio_venta is
     'null si no habia tipo de cambio disponible o la moneda no es USD/PEN).';
 comment on column public.preliquidaciones.fecha_tipo_cambio is
     'Fecha de publicacion SUNAT del tipo_cambio_venta usado.';
+
+-- Tasas de cada preliquidacion leidas de SUNAT (ver arriba, seccion 14).
+-- Los defaults (16% IGV, 2% IPM, LOCAL) dejan las filas anteriores a este
+-- cambio exactamente como se calcularon.
+comment on column public.preliquidaciones.fuente_tasas is
+    'SUNAT = ad valorem, ISC, IGV e IPM leidos en vivo del portal de SUNAT al calcular; '
+    'LOCAL = SUNAT no respondio y se usaron el ad valorem del arancel 2022 y las tasas generales.';
+comment on column public.preliquidaciones.isc_requiere_revision is
+    'true si SUNAT informa el ISC como monto especifico (ej. por litro o grado alcoholico) en vez '
+    'de porcentaje: no se calcula automaticamente y debe revisarse a mano.';
