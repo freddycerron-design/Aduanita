@@ -36,6 +36,16 @@ services:
         value: documentos-aduaneros
       - key: GEMINI_API_KEY
         sync: false
+      # Modelos de Gemini (ver Settings en app/config.py). Si Google retira
+      # uno, se cambia aca o en el dashboard de Render sin tocar codigo.
+      # Cambiar el de embeddings exige ademas correr
+      # scripts/recalcular_embeddings.py (vectores incompatibles).
+      - key: GEMINI_MODEL_TEXTO_Y_VISION
+        value: gemini-3.6-flash
+      - key: GEMINI_MODELS_RESPALDO
+        value: gemini-3.7-flash,gemini-3.5-flash
+      - key: GEMINI_MODEL_EMBEDDINGS
+        value: gemini-embedding-001
       # Origenes permitidos para CORS, separados por coma -- el frontend
       # Streamlit (en retiro) y el nuevo frontend React, mientras conviven.
       # Ajustar si cambias el "name" de cualquiera de los dos.

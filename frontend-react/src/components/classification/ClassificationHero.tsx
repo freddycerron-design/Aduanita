@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { BookOpen, Check, Copy } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 
 import { Badge, type BadgeProps } from "@/components/ui/badge";
@@ -81,6 +81,13 @@ export function ClassificationHero({
   titulo = "Subpartida propuesta",
 }: ClassificationHeroProps) {
   const etiqueta = etiquetaSecundaria ?? (confianza ? ETIQUETA_CONFIANZA[confianza] : undefined);
+  const location = useLocation();
+  // Pantalla a la que vuelve "Volver" en Aranceles: este mismo despacho en
+  // la pestaña Preclasificación (el hero solo vive ahí), aunque la URL
+  // actual no traiga `?tab=` porque se llegó por la pestaña por defecto.
+  const parametrosVuelta = new URLSearchParams(location.search);
+  parametrosVuelta.set("tab", "clasificacion");
+  const urlVuelta = `${location.pathname}?${parametrosVuelta.toString()}`;
   const variante = confianza ? COLOR_POR_CONFIANZA[confianza] : "neutral";
 
   return (
@@ -100,7 +107,7 @@ export function ClassificationHero({
                 (ArancelPage lee `?q=`), para ver su ubicación y la ficha de
                 SUNAT sin tipear el código. */}
             <Link
-              to={`/aranceles?q=${encodeURIComponent(subpartida)}`}
+              to={`/aranceles?${new URLSearchParams({ q: subpartida, volver: urlVuelta }).toString()}`}
               className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[13px] font-medium text-texto transition-colors hover:bg-surface-border/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <BookOpen className="size-4" />

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { Check, Copy, ExternalLink, Loader2, Search, Star, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Copy, ExternalLink, Loader2, Search, Star, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { useBuscarArancel } from "@/hooks/useBuscarArancel";
 import { useAlternarFavorito, usePartidasFavoritas } from "@/hooks/usePartidasFavoritas";
@@ -164,6 +164,11 @@ export function ArancelPage() {
   // buscando (ej. "Buscar en aranceles" desde la preclasificación) y el
   // botón atrás vuelve al resultado anterior.
   const consulta = searchParams.get("q") ?? "";
+  // `?volver=` lo pone quien abre esta pantalla para buscar algo puntual
+  // (ej. "Buscar en aranceles" desde la preclasificación). Solo se acepta
+  // una ruta interna de un despacho: nunca una URL arbitraria.
+  const volverParam = searchParams.get("volver");
+  const volver = volverParam && volverParam.startsWith("/despachos/") ? volverParam : null;
   const [entrada, setEntrada] = useState(consulta);
   const [partidaSunat, setPartidaSunat] = useState<SubpartidaArancelaria | null>(null);
   const { data: resultados, isFetching, isError, error } = useBuscarArancel(consulta);
@@ -202,6 +207,14 @@ export function ArancelPage() {
     <div className="h-full overflow-y-auto p-8">
       <div className="mx-auto flex max-w-5xl flex-col gap-6">
         <div>
+          {volver && (
+            <Button asChild variant="ghost" size="sm" className="-ml-3 mb-2">
+              <Link to={volver}>
+                <ArrowLeft />
+                Volver a la preclasificación
+              </Link>
+            </Button>
+          )}
           <h1 className="text-xl font-semibold text-texto">Consulta de aranceles</h1>
           <p className="mt-1 text-sm text-texto-secundario">
             Busca por código de subpartida (ej. <span className="font-mono">9011</span> o{" "}
