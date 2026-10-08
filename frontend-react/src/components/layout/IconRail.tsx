@@ -38,7 +38,9 @@ const ITEM_HOME: ItemRuta = { path: "/", icono: Home, etiqueta: "Inicio" };
 // llama por su nombre corto.
 const ITEM_VALIDADOR: ItemRuta = { path: "/despachos", icono: FileCheck2, etiqueta: "Validador" };
 
-const ITEM_ARANCEL: ItemRuta = { path: "/aranceles", icono: BookOpen, etiqueta: "Aranceles" };
+// La ruta sigue siendo /aranceles (hay links guardados); en pantalla se
+// llama Clasificador: búsqueda en el arancel + clasificación con IA.
+const ITEM_ARANCEL: ItemRuta = { path: "/aranceles", icono: BookOpen, etiqueta: "Clasificador" };
 
 const ITEM_CONFIGURACION: ItemRuta = { path: "/admin", icono: Settings, etiqueta: "Configuración" };
 

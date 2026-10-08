@@ -27,6 +27,10 @@ import type {
   EstructuraPorDocumento,
   SubpartidaArancelaria,
   AnexoSunat,
+  ContextoChat,
+  MensajeChat,
+  RespuestaChat,
+  SystemPromptOut,
   MedidasSunat,
   TipoAnexoSunat,
   TipoCambioOut,
@@ -348,6 +352,36 @@ export function calcularPreliquidacion(
     method: "POST",
     json: datos,
   });
+}
+
+// --- clasificador con IA ----------------------------------------------------------
+
+/** Un turno del chat: manda la conversación completa y devuelve una
+ * pregunta o la clasificación final. */
+export function enviarMensajeClasificador(historial: MensajeChat[], contexto: ContextoChat): Promise<RespuestaChat> {
+  return apiFetch<RespuestaChat>("/clasificador-ia/mensaje", { method: "POST", json: { historial, contexto } });
+}
+
+export function enviarFeedbackClasificador(datos: {
+  subpartida: string;
+  nivel_confianza: string;
+  util: boolean;
+  comentario?: string | null;
+  conversacion: { rol: "usuario" | "asistente"; texto: string }[];
+}): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>("/clasificador-ia/feedback", { method: "POST", json: datos });
+}
+
+export function obtenerPromptClasificador(): Promise<SystemPromptOut> {
+  return apiFetch<SystemPromptOut>("/admin/clasificador-ia/prompt");
+}
+
+export function guardarPromptClasificador(prompt: string): Promise<SystemPromptOut> {
+  return apiFetch<SystemPromptOut>("/admin/clasificador-ia/prompt", { method: "PUT", json: { prompt } });
+}
+
+export function restaurarPromptClasificador(): Promise<SystemPromptOut> {
+  return apiFetch<SystemPromptOut>("/admin/clasificador-ia/prompt", { method: "DELETE" });
 }
 
 // --- tipo de cambio SUNAT (admin) ------------------------------------------------

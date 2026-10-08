@@ -101,6 +101,16 @@ módulo por responsabilidad:
   (fórmulas SUNAT), un snapshot que el especialista puede recalcular.
 - `email_draft_service.py` — genera el borrador de comunicación con **plantillas f-string
   determinísticas, no un LLM** (así nunca alucina una cifra o discrepancia que no es real).
+- `clasificador_ia_service.py` — chat "Clasificador con IA" (pestaña de Clasificador): conversación sin
+  estado (el frontend manda el historial completo + adjuntos cada turno), system prompt editable en
+  `parametros_sistema` (predeterminado en el código), y en cada turno se le pasan al modelo subpartidas
+  REALES del arancel (por texto y por prefijo de las partidas que pidió explorar) para que no invente
+  códigos. Al clasificar valida el código y lee los tributos vigentes de SUNAT.
+- `sunat_arancel_service.py` — consulta en vivo del portal de aranceles de SUNAT (gravámenes, ubicación en
+  la nomenclatura, anexos). La preliquidación usa estos gravámenes (ad valorem, ISC, IGV, IPM) en vez de
+  tasas fijas.
+- `tipo_cambio_service.py` — tipo de cambio venta SUNAT del día (`tipoCambio.txt`), guardado por fecha en
+  `tipos_cambio`; la preliquidación lo usa para mostrar los montos en soles.
 - `export_service.py` — detalle del despacho → `.xlsx`, reusando el mismo armado `_armar_detalle_despacho`
   que `app/main.py` usa para la respuesta JSON.
 

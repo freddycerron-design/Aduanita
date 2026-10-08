@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { useBuscarArancel } from "@/hooks/useBuscarArancel";
+import { useChatClasificador } from "@/hooks/useChatClasificador";
+import { ChatClasificador } from "@/components/clasificador/ChatClasificador";
 import { useAlternarFavorito, usePartidasFavoritas } from "@/hooks/usePartidasFavoritas";
 import { raicesDeConsulta, resaltar } from "@/lib/resaltar";
 import type { SubpartidaArancelaria } from "@/lib/types";
@@ -148,7 +150,7 @@ function TablaPartidas({ partidas, favoritos, onAlternarFavorito, onVerSunat, ra
   );
 }
 
-type PestanaArancel = "buscar" | "favoritos";
+type PestanaArancel = "ia" | "buscar" | "favoritos";
 
 /**
  * Consulta libre del Arancel Nacional + subpartidas favoritas del usuario.
@@ -159,7 +161,11 @@ type PestanaArancel = "buscar" | "favoritos";
  */
 export function ArancelPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const pestana: PestanaArancel = searchParams.get("tab") === "favoritos" ? "favoritos" : "buscar";
+  const tabParam = searchParams.get("tab");
+  const pestana: PestanaArancel = tabParam === "favoritos" || tabParam === "ia" ? tabParam : "buscar";
+  // El chat vive acá y no en su pestaña: Radix desmonta la pestaña
+  // inactiva y se perdería la conversación al ir a Buscar y volver.
+  const chat = useChatClasificador();
   // La búsqueda vive en `?q=`: así otra pantalla puede abrir esta ya
   // buscando (ej. "Buscar en aranceles" desde la preclasificación) y el
   // botón atrás vuelve al resultado anterior.
@@ -215,23 +221,31 @@ export function ArancelPage() {
               </Link>
             </Button>
           )}
-          <h1 className="text-xl font-semibold text-texto">Consulta de aranceles</h1>
+          <h1 className="text-xl font-semibold text-texto">Clasificador</h1>
           <p className="mt-1 text-sm text-texto-secundario">
-            Busca por código de subpartida (ej. <span className="font-mono">9011</span> o{" "}
-            <span className="font-mono">6305.33</span>) o por descripción de la mercancía (ej.{" "}
-            <span className="italic">sacos de polipropileno</span>). Marca con la estrella las que uses seguido.
+            Clasifica una mercancía conversando con la IA, o busca directamente en el Arancel de Aduanas.
           </p>
         </div>
 
         <Tabs value={pestana} onValueChange={irAPestana}>
           <TabsList>
-            <TabsTrigger value="buscar">Buscar</TabsTrigger>
+            <TabsTrigger value="ia">Clasificador con IA</TabsTrigger>
+            <TabsTrigger value="buscar">Buscar en el arancel</TabsTrigger>
             <TabsTrigger value="favoritos">
               Favoritos{favoritas && favoritas.length > 0 ? ` (${favoritas.length})` : ""}
             </TabsTrigger>
           </TabsList>
 
+          <TabsContent value="ia">
+            <ChatClasificador chat={chat} onVerFicha={setPartidaSunat} />
+          </TabsContent>
+
           <TabsContent value="buscar" className="flex flex-col gap-6">
+            <p className="text-[13px] text-texto-secundario">
+              Busca por código de subpartida (ej. <span className="font-mono">9011</span> o{" "}
+              <span className="font-mono">6305.33</span>) o por descripción de la mercancía (ej.{" "}
+              <span className="italic">sacos de polipropileno</span>). Marca con la estrella las que uses seguido.
+            </p>
             <form onSubmit={buscar} className="flex gap-2">
               <div className="relative flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-texto-secundario" />

@@ -18,6 +18,7 @@ import { ReglasValidacionTable } from "@/components/admin/ReglasValidacionTable"
 import { CargoEspecialForm } from "@/components/admin/CargoEspecialForm";
 import { CargosEspecialesTable } from "@/components/admin/CargosEspecialesTable";
 import { TiposCambioPanel } from "@/components/admin/TiposCambioPanel";
+import { PromptClasificadorPanel } from "@/components/admin/PromptClasificadorPanel";
 import { UsuarioForm } from "@/components/admin/UsuarioForm";
 import { UsuariosTable } from "@/components/admin/UsuariosTable";
 import { ClienteForm } from "@/components/admin/ClienteForm";
@@ -27,7 +28,14 @@ import { DatosDocumentosPanel } from "@/components/admin/DatosDocumentosPanel";
 /** Orden de las pestañas: primero el "quién" (cuentas del equipo e
  * importadores), después el "cómo" (reglas de negocio que configuran el
  * comportamiento del sistema). */
-type PestanaAdmin = "usuarios" | "importadores" | "reglas" | "datos-documentos" | "cargos" | "tipo-cambio";
+type PestanaAdmin =
+  | "usuarios"
+  | "importadores"
+  | "reglas"
+  | "datos-documentos"
+  | "cargos"
+  | "tipo-cambio"
+  | "clasificador-ia";
 const PESTANAS_VALIDAS: PestanaAdmin[] = [
   "usuarios",
   "importadores",
@@ -35,6 +43,7 @@ const PESTANAS_VALIDAS: PestanaAdmin[] = [
   "datos-documentos",
   "cargos",
   "tipo-cambio",
+  "clasificador-ia",
 ];
 
 /**
@@ -114,6 +123,7 @@ export function AdminPage() {
             <TabsTrigger value="datos-documentos">Datos de documentos</TabsTrigger>
             <TabsTrigger value="cargos">Cargos especiales</TabsTrigger>
             <TabsTrigger value="tipo-cambio">Tipo de cambio</TabsTrigger>
+            <TabsTrigger value="clasificador-ia">Clasificador IA</TabsTrigger>
           </TabsList>
 
           <TabsContent value="usuarios">
@@ -211,6 +221,10 @@ export function AdminPage() {
 
           <TabsContent value="tipo-cambio">
             <TiposCambioPanel />
+          </TabsContent>
+
+          <TabsContent value="clasificador-ia">
+            <PromptClasificadorPanel />
           </TabsContent>
         </Tabs>
       </div>

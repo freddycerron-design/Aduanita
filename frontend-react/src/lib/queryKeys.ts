@@ -40,6 +40,7 @@ export const queryKeys = {
   preliquidacion: {
     detail: (idDespacho: string) => ["preliquidacion", idDespacho] as const,
   },
+  promptClasificador: ["prompt-clasificador"] as const,
   tiposCambio: {
     list: () => ["tipos-cambio"] as const,
   },

@@ -925,3 +925,50 @@ comment on column public.preliquidaciones.fuente_tasas is
 comment on column public.preliquidaciones.isc_requiere_revision is
     'true si SUNAT informa el ISC como monto especifico (ej. por litro o grado alcoholico) en vez '
     'de porcentaje: no se calcula automaticamente y debe revisarse a mano.';
+
+
+-- ---------------------------------------------------------------------
+-- 19. parametros_sistema + clasificador_ia_feedback
+-- ---------------------------------------------------------------------
+-- Parametros de texto editables por un ADMIN desde Configuracion. Hoy:
+-- 'clasificador_ia_system_prompt', el system prompt del chat "Clasificador
+-- con IA" (services/clasificador_ia_service.py). Sin fila = se usa el
+-- prompt predeterminado del codigo, asi que la tabla puede estar vacia.
+create table public.parametros_sistema (
+    clave           text primary key,
+    valor           text not null,
+    actualizado_por uuid references public.perfiles_especialista(id) on delete set null,
+    actualizado_en  timestamptz not null default now()
+);
+
+comment on table public.parametros_sistema is
+    'Parametros de texto editables por ADMIN (ej. clasificador_ia_system_prompt). Sin fila = valor por defecto del codigo.';
+
+alter table public.parametros_sistema enable row level security;
+
+create policy "select_parametros_sistema" on public.parametros_sistema
+    for select using (public.es_personal_interno());
+
+-- Respuesta a "Te sirvio esta clasificacion?" del chat Clasificador con
+-- IA: sirve para medir y mejorar el prompt. Guarda solo el texto de la
+-- conversacion (no los archivos adjuntos).
+create table public.clasificador_ia_feedback (
+    id              uuid primary key default gen_random_uuid(),
+    id_usuario      uuid references public.perfiles_especialista(id) on delete set null,
+    subpartida      text not null,
+    nivel_confianza text,
+    util            boolean not null,
+    comentario      text,
+    conversacion    jsonb not null default '[]'::jsonb,
+    creado_en       timestamptz not null default now()
+);
+
+comment on table public.clasificador_ia_feedback is
+    'Feedback del usuario sobre cada clasificacion del chat Clasificador con IA (util si/no + comentario).';
+
+create index clasificador_ia_feedback_creado_en_idx on public.clasificador_ia_feedback (creado_en desc);
+
+alter table public.clasificador_ia_feedback enable row level security;
+
+create policy "select_clasificador_ia_feedback" on public.clasificador_ia_feedback
+    for select using (public.es_personal_interno());

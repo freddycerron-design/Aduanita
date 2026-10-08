@@ -503,3 +503,52 @@ export interface PortalDespachoOut {
   fecha_creacion: string;
   actualizado_en: string | null;
 }
+
+// --- clasificador con IA (chat) ---------------------------------------
+
+export interface AdjuntoChat {
+  nombre: string;
+  /** Base64 sin el prefijo "data:...;base64,". */
+  contenido_base64: string;
+}
+
+export interface MensajeChat {
+  rol: "usuario" | "asistente";
+  texto: string;
+  adjunto?: AdjuntoChat | null;
+}
+
+/** Lo que el modelo pidió buscar en el arancel; se devuelve tal cual en el
+ * siguiente turno. */
+export interface ContextoChat {
+  terminos_busqueda: string[];
+  partidas_a_explorar: string[];
+}
+
+export interface ClasificacionChat {
+  subpartida: string;
+  titulo: string;
+  descripcion_oficial: string | null;
+  existe_en_arancel: boolean;
+  nivel_confianza: NivelConfianza;
+  score_confianza: number;
+  justificacion: string;
+  descartadas: { subpartida: string; motivo: string }[];
+  /** Ad Valorem / ISC / IGV / IPM. */
+  tributos: { concepto: string; valor: string }[];
+  fuente_tributos: "SUNAT" | "LOCAL";
+}
+
+export interface RespuestaChat {
+  tipo: "pregunta" | "clasificacion";
+  mensaje: string;
+  opciones: string[];
+  contexto: ContextoChat;
+  clasificacion: ClasificacionChat | null;
+}
+
+export interface SystemPromptOut {
+  prompt: string;
+  es_predeterminado: boolean;
+  predeterminado: string;
+}

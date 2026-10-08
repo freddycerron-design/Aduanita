@@ -61,6 +61,7 @@ documentos. Dos barreras independientes lo sostienen:
      secciones 8, 9 y 15).
 """
 from __future__ import annotations
+import json
 import logging
 
 from datetime import date, datetime, timezone
@@ -96,6 +97,18 @@ from services.email_draft_service import (
 from services.export_service import generar_excel_despacho
 from services.gemini_classifier import PropuestaClasificacion, clasificar
 from services.preliquidacion_service import TASA_IGV_GENERAL, TASA_IPM_GENERAL, calcular_preliquidacion
+from google.genai import errors as genai_errors
+
+from services.clasificador_ia_service import (
+    CLAVE_SYSTEM_PROMPT,
+    SYSTEM_PROMPT_PREDETERMINADO,
+    AdjuntoInvalidoError,
+    ContextoChat,
+    MensajeChat,
+    RespuestaChat,
+    conversar,
+    obtener_system_prompt,
+)
 from services.tipo_cambio_service import (
     TipoCambioDia,
     TipoCambioSunatNoDisponibleError,
@@ -2215,6 +2228,116 @@ def eliminar_cargo_especial(
     _obtener_cargo_especial_o_404(admin, id_cargo)
     admin.table("cargos_especiales_arancel").delete().eq("id", id_cargo).execute()
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------
+# Clasificador con IA (chat conversacional, ver services/clasificador_ia_service.py)
+# ---------------------------------------------------------------------
+
+class MensajeClasificadorRequest(BaseModel):
+    historial: list[MensajeChat] = Field(min_length=1, max_length=40)
+    contexto: ContextoChat = Field(default_factory=ContextoChat)
+
+
+class MensajeFeedback(BaseModel):
+    rol: Literal["usuario", "asistente"]
+    texto: str
+
+
+class FeedbackClasificadorRequest(BaseModel):
+    subpartida: str
+    nivel_confianza: str | None = None
+    util: bool
+    comentario: str | None = Field(default=None, max_length=2000)
+    conversacion: list[MensajeFeedback] = Field(default_factory=list, max_length=60)
+
+
+class SystemPromptOut(BaseModel):
+    prompt: str
+    es_predeterminado: bool
+    predeterminado: str
+
+
+class SystemPromptUpdate(BaseModel):
+    prompt: str = Field(min_length=50, max_length=30000)
+
+
+@app.post("/clasificador-ia/mensaje", response_model=RespuestaChat)
+def mensaje_clasificador_ia(
+    datos: MensajeClasificadorRequest, usuario: UsuarioAutenticado = Depends(get_current_staff)
+) -> RespuestaChat:
+    """Un turno del chat: devuelve una pregunta o la clasificacion final.
+    Sin estado: el frontend manda la conversacion completa cada vez."""
+    admin = get_supabase_admin_client()
+    try:
+        return conversar(admin, datos.historial, datos.contexto)
+    except AdjuntoInvalidoError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except genai_errors.APIError as error:
+        if error.code == 429:
+            detalle = "Se alcanzó el límite de consultas a la IA por hoy. Intenta más tarde."
+        else:
+            detalle = "El servicio de IA no está disponible en este momento. Intenta de nuevo en unos minutos."
+        raise HTTPException(status_code=502, detail=detalle) from error
+    except (ValidationError, json.JSONDecodeError) as error:
+        raise HTTPException(
+            status_code=502, detail="La IA respondió en un formato inesperado. Vuelve a enviar el mensaje."
+        ) from error
+
+
+@app.post("/clasificador-ia/feedback")
+def feedback_clasificador_ia(
+    datos: FeedbackClasificadorRequest, usuario: UsuarioAutenticado = Depends(get_current_staff)
+) -> dict:
+    admin = get_supabase_admin_client()
+    admin.table("clasificador_ia_feedback").insert(
+        {
+            "id_usuario": usuario.id,
+            "subpartida": datos.subpartida,
+            "nivel_confianza": datos.nivel_confianza,
+            "util": datos.util,
+            "comentario": (datos.comentario or "").strip() or None,
+            "conversacion": [m.model_dump() for m in datos.conversacion],
+        }
+    ).execute()
+    return {"status": "ok"}
+
+
+@app.get("/admin/clasificador-ia/prompt", response_model=SystemPromptOut)
+def obtener_prompt_clasificador(usuario: UsuarioAutenticado = Depends(get_current_staff)) -> dict:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    prompt, es_predeterminado = obtener_system_prompt(admin)
+    return {"prompt": prompt, "es_predeterminado": es_predeterminado, "predeterminado": SYSTEM_PROMPT_PREDETERMINADO}
+
+
+@app.put("/admin/clasificador-ia/prompt", response_model=SystemPromptOut)
+def guardar_prompt_clasificador(
+    datos: SystemPromptUpdate, usuario: UsuarioAutenticado = Depends(get_current_staff)
+) -> dict:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    admin.table("parametros_sistema").upsert(
+        {
+            "clave": CLAVE_SYSTEM_PROMPT,
+            "valor": datos.prompt,
+            "actualizado_por": usuario.id,
+            "actualizado_en": _ahora_iso(),
+        },
+        on_conflict="clave",
+    ).execute()
+    return obtener_prompt_clasificador(usuario)
+
+
+@app.delete("/admin/clasificador-ia/prompt", response_model=SystemPromptOut)
+def restaurar_prompt_clasificador(usuario: UsuarioAutenticado = Depends(get_current_staff)) -> dict:
+    """Vuelve al prompt predeterminado del codigo (borra el personalizado)."""
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    admin.table("parametros_sistema").delete().eq("clave", CLAVE_SYSTEM_PROMPT).execute()
+    return obtener_prompt_clasificador(usuario)
 
 
 # ---------------------------------------------------------------------
