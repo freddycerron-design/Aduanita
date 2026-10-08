@@ -198,7 +198,25 @@ export interface PreliquidacionOut {
   antidumping_monto: number;
   derecho_especifico_monto: number;
   total_tributos: number;
+  /** Tipo de cambio venta SUNAT para mostrar los montos en soles; null =
+   * sin conversión (moneda distinta de USD/PEN o sin tipo de cambio). */
+  tipo_cambio_venta: number | null;
+  /** Fecha de publicación SUNAT de ese tipo de cambio (AAAA-MM-DD). */
+  fecha_tipo_cambio: string | null;
   actualizado_en: string;
+}
+
+export interface TipoCambioOut {
+  fecha: string;
+  compra: number;
+  venta: number;
+  fuente: "SUNAT" | "MANUAL";
+  actualizado_en: string;
+}
+
+export interface TipoCambioUpsert {
+  compra: number;
+  venta: number;
 }
 
 export interface CalcularPreliquidacionRequest {

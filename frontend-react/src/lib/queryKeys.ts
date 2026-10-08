@@ -40,6 +40,9 @@ export const queryKeys = {
   preliquidacion: {
     detail: (idDespacho: string) => ["preliquidacion", idDespacho] as const,
   },
+  tiposCambio: {
+    list: () => ["tipos-cambio"] as const,
+  },
   cargosEspeciales: {
     list: () => ["cargos-especiales-arancel"] as const,
   },

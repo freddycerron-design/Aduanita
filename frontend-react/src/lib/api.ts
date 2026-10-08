@@ -29,6 +29,8 @@ import type {
   AnexoSunat,
   MedidasSunat,
   TipoAnexoSunat,
+  TipoCambioOut,
+  TipoCambioUpsert,
   TipoDocumento,
   UsuarioCreate,
   UsuarioOut,
@@ -346,6 +348,28 @@ export function calcularPreliquidacion(
     method: "POST",
     json: datos,
   });
+}
+
+// --- tipo de cambio SUNAT (admin) ------------------------------------------------
+
+export function listarTiposCambio(): Promise<TipoCambioOut[]> {
+  return apiFetch<TipoCambioOut[]>("/admin/tipos-cambio");
+}
+
+/** Trae de SUNAT el tipo de cambio publicado hoy y lo guarda. */
+export function sincronizarTipoCambio(): Promise<TipoCambioOut> {
+  return apiFetch<TipoCambioOut>("/admin/tipos-cambio/sincronizar", { method: "POST" });
+}
+
+export function guardarTipoCambio(fecha: string, datos: TipoCambioUpsert): Promise<TipoCambioOut> {
+  return apiFetch<TipoCambioOut>(`/admin/tipos-cambio/${fecha}`, {
+    method: "PUT",
+    json: datos,
+  });
+}
+
+export function eliminarTipoCambio(fecha: string): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>(`/admin/tipos-cambio/${fecha}`, { method: "DELETE" });
 }
 
 // --- cargos especiales del arancel (admin: antidumping / derecho especifico) --------

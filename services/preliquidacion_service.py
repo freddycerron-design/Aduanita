@@ -12,9 +12,11 @@ Formula estandar SUNAT usada aqui:
     Total        = Ad_Valorem + IGV + IPM + Antidumping + Derecho_especifico
 
 Nota: el antidumping NO forma parte de la base de IGV/IPM (se suma
-directo al total). No se aplica tipo de cambio -- todo queda en la
-moneda del Valor CIF (normalmente USD), igual que el resto de montos que
-ya maneja la app (monto_total de factura, valor_asegurado del seguro).
+directo al total). El calculo queda en la moneda del Valor CIF
+(normalmente USD); la conversion a soles es aparte: el endpoint guarda en
+el snapshot el tipo de cambio venta SUNAT del dia (ver
+services/tipo_cambio_service.py) y el frontend muestra cada monto por ese
+factor.
 Antidumping y derecho especifico no tienen una fuente oficial CSV/API
 consolidada (son resoluciones puntuales de INDECOPI/MEF) -- se cargan a
 mano via cargos_especiales_arancel (ver app/main.py, CRUD de ADMIN) y

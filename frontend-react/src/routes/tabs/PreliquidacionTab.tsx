@@ -6,7 +6,7 @@ import { useProfile } from "@/hooks/useProfile";
 import { usePreliquidacion } from "@/hooks/usePreliquidacion";
 import { useCalcularPreliquidacion } from "@/hooks/useCalcularPreliquidacion";
 import { puedeCalcularPreliquidacion } from "@/lib/roles";
-import type { DocumentoExtraidoOut, FacturaContenido } from "@/lib/types";
+import type { DocumentoExtraidoOut, FacturaContenido, PreliquidacionOut } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -186,37 +186,10 @@ export function PreliquidacionTab({ idDespacho, documentos }: PreliquidacionTabP
       {resultado && (
         <section className="flex flex-col gap-3">
           <h2 className="text-sm font-semibold text-texto">Resultado</h2>
-          <div className="overflow-x-auto rounded-2xl border border-border bg-card">
-            <table className="w-full text-sm">
-              <tbody>
-                <FilaResultado etiqueta="Valor CIF" valor={resultado.valor_cif} moneda={resultado.moneda} />
-                <FilaResultado
-                  etiqueta={`Ad Valorem (${resultado.ad_valorem_tasa}%)`}
-                  valor={resultado.ad_valorem_monto}
-                  moneda={resultado.moneda}
-                />
-                <FilaResultado etiqueta="Base IGV/IPM" valor={resultado.base_igv_ipm} moneda={resultado.moneda} />
-                <FilaResultado etiqueta="IGV (16%)" valor={resultado.igv_monto} moneda={resultado.moneda} />
-                <FilaResultado etiqueta="IPM (2%)" valor={resultado.ipm_monto} moneda={resultado.moneda} />
-                <FilaResultado etiqueta="Antidumping" valor={resultado.antidumping_monto} moneda={resultado.moneda} />
-                <FilaResultado
-                  etiqueta="Derecho específico"
-                  valor={resultado.derecho_especifico_monto}
-                  moneda={resultado.moneda}
-                />
-                <tr className="border-t border-border bg-surface font-semibold text-texto">
-                  <td className="px-4 py-3">Total tributos</td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums">
-                    {resultado.moneda} {resultado.total_tributos.toFixed(2)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <TablaResultado resultado={resultado} />
           <p className="rounded-xl border border-amber/40 bg-amber/10 px-4 py-3 text-[13px] leading-relaxed text-amber">
             Antidumping y derecho específico requieren verificación caso a caso (INDECOPI/MEF) -- los valores
-            de arriba son sugerencias, no una tasa vigente garantizada. No se aplica tipo de cambio: todos los
-            montos quedan en la moneda del Valor CIF.
+            de arriba son sugerencias, no una tasa vigente garantizada.
           </p>
         </section>
       )}
@@ -224,13 +197,99 @@ export function PreliquidacionTab({ idDespacho, documentos }: PreliquidacionTabP
   );
 }
 
-function FilaResultado({ etiqueta, valor, moneda }: { etiqueta: string; valor: number; moneda: string }) {
+const formatoMonto = new Intl.NumberFormat("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** `2026-10-08` -> `08/10/2026` sin pasar por Date (evita el corrimiento
+ * de un día por zona horaria). */
+function formatearFecha(iso: string): string {
+  const [anio, mes, dia] = iso.split("-");
+  return `${dia}/${mes}/${anio}`;
+}
+
+/**
+ * Montos en la moneda del Valor CIF y, al lado, en soles con el tipo de
+ * cambio venta SUNAT que quedó guardado en el snapshot al calcular (si
+ * después se corrige la tabla de tipos de cambio, esto no cambia solo:
+ * hay que recalcular). La columna en soles no se muestra si la moneda ya
+ * es PEN.
+ */
+function TablaResultado({ resultado }: { resultado: PreliquidacionOut }) {
+  const moneda = resultado.moneda.toUpperCase();
+  const enSoles = moneda === "PEN" || moneda === "S/";
+  const tipoCambio = resultado.tipo_cambio_venta;
+  const fechaCalculo = resultado.actualizado_en.slice(0, 10);
+
+  const filas: { etiqueta: string; valor: number; total?: boolean }[] = [
+    { etiqueta: "Valor CIF", valor: resultado.valor_cif },
+    { etiqueta: `Ad Valorem (${resultado.ad_valorem_tasa}%)`, valor: resultado.ad_valorem_monto },
+    { etiqueta: "Base IGV/IPM", valor: resultado.base_igv_ipm },
+    { etiqueta: "IGV (16%)", valor: resultado.igv_monto },
+    { etiqueta: "IPM (2%)", valor: resultado.ipm_monto },
+    { etiqueta: "Antidumping", valor: resultado.antidumping_monto },
+    { etiqueta: "Derecho específico", valor: resultado.derecho_especifico_monto },
+    { etiqueta: "Total tributos", valor: resultado.total_tributos, total: true },
+  ];
+
   return (
-    <tr className="border-t border-border first:border-t-0">
-      <td className="px-4 py-2.5 text-texto-secundario">{etiqueta}</td>
-      <td className="px-4 py-2.5 text-right font-mono tabular-nums text-texto">
-        {moneda} {valor.toFixed(2)}
-      </td>
-    </tr>
+    <div className="flex flex-col gap-2">
+      <div className="overflow-x-auto rounded-xl border border-border bg-card">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border text-[13px] text-texto-secundario">
+              <th scope="col" className="px-4 py-2.5 text-left font-medium">
+                Concepto
+              </th>
+              <th scope="col" className="px-4 py-2.5 text-right font-medium">
+                {resultado.moneda}
+              </th>
+              {!enSoles && (
+                <th scope="col" className="px-4 py-2.5 text-right font-medium">
+                  Soles (S/)
+                </th>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {filas.map((fila) => (
+              <tr
+                key={fila.etiqueta}
+                className={
+                  fila.total
+                    ? "border-t border-border bg-surface font-semibold text-texto"
+                    : "border-t border-border first:border-t-0"
+                }
+              >
+                <td className={fila.total ? "px-4 py-3" : "px-4 py-2.5 text-texto-secundario"}>{fila.etiqueta}</td>
+                <td className="px-4 py-2.5 text-right font-mono tabular-nums text-texto">
+                  {formatoMonto.format(fila.valor)}
+                </td>
+                {!enSoles && (
+                  <td className="px-4 py-2.5 text-right font-mono tabular-nums text-texto">
+                    {tipoCambio === null ? "—" : formatoMonto.format(fila.valor * tipoCambio)}
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {!enSoles &&
+        (tipoCambio !== null && resultado.fecha_tipo_cambio ? (
+          <p className="text-[13px] text-texto-secundario">
+            Tipo de cambio venta SUNAT del {formatearFecha(resultado.fecha_tipo_cambio)}:{" "}
+            <span className="font-mono font-semibold text-texto">S/ {tipoCambio.toFixed(3)}</span>
+            {resultado.fecha_tipo_cambio !== fechaCalculo &&
+              " (último publicado antes de la fecha del cálculo)"}
+            .
+          </p>
+        ) : (
+          <p className="text-[13px] text-amber">
+            {moneda === "USD"
+              ? "No hay tipo de cambio disponible (SUNAT no respondió y no hay uno guardado). Cárgalo en Configuración > Tipo de cambio y vuelve a calcular."
+              : `SUNAT solo publica el tipo de cambio del dólar: los montos en ${resultado.moneda} no se convierten a soles.`}
+          </p>
+        ))}
+    </div>
   );
 }

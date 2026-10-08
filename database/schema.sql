@@ -686,8 +686,8 @@ comment on table public.preliquidaciones is
     'recalcula y sobreescribe (upsert) cada vez que el especialista/liquidador '
     'presiona "Calcular" en la pestana Pre-liquidacion. ad_valorem_tasa guarda el % '
     'usado en el momento del calculo (snapshot), por si partidas_arancelarias.ad_valorem '
-    'cambia despues. No se aplica tipo de cambio: todos los montos quedan en la moneda '
-    'de valor_cif (normalmente USD) -- limite aceptado, ver app/main.py.';
+    'cambia despues. Los montos quedan en la moneda de valor_cif; tipo_cambio_venta '
+    '(seccion 18) guarda el tipo de cambio con que el frontend los muestra en soles.';
 
 alter table public.preliquidaciones enable row level security;
 
@@ -861,3 +861,48 @@ alter table public.propuestas_clasificacion enable row level security;
 
 create policy "select_propuestas_clasificacion" on public.propuestas_clasificacion
     for select using (public.es_personal_interno());
+
+
+-- ---------------------------------------------------------------------
+-- 18. tipos_cambio
+-- ---------------------------------------------------------------------
+-- Tipo de cambio del dolar publicado por SUNAT, uno por fecha. Lo usa la
+-- preliquidacion para mostrar los montos en soles (tipo de cambio VENTA,
+-- el que SUNAT aplica a las importaciones).
+--
+-- Se llena solo: al calcular una preliquidacion sin el tipo de cambio de
+-- hoy, el backend lo lee de https://www.sunat.gob.pe/a/txt/tipoCambio.txt
+-- (archivo publico de SUNAT con el del dia) y lo guarda aca. La consulta
+-- mensual de e-consulta.sunat.gob.pe no sirve para esto: exige un token
+-- de reCAPTCHA. Ese archivo solo trae el dia actual, por eso el historico
+-- se arma dia a dia; un ADMIN puede cargar o corregir fechas a mano desde
+-- Configuracion (fuente MANUAL).
+create table public.tipos_cambio (
+    fecha           date primary key,
+    compra          numeric(10, 3) not null check (compra > 0),
+    venta           numeric(10, 3) not null check (venta > 0),
+    fuente          text not null default 'SUNAT' check (fuente in ('SUNAT', 'MANUAL')),
+    actualizado_por uuid references public.perfiles_especialista(id) on delete set null,
+    actualizado_en  timestamptz not null default now()
+);
+
+comment on table public.tipos_cambio is
+    'Tipo de cambio USD/PEN de SUNAT por fecha (compra y venta). La preliquidacion usa la venta.';
+
+alter table public.tipos_cambio enable row level security;
+
+-- Solo lectura para el personal interno; escribe el backend (service_role).
+create policy "select_tipos_cambio" on public.tipos_cambio
+    for select using (public.es_personal_interno());
+
+-- Snapshot del tipo de cambio usado en cada preliquidacion: si despues se
+-- corrige la tabla, la preliquidacion ya calculada no cambia sola.
+alter table public.preliquidaciones
+    add column tipo_cambio_venta  numeric(10, 3),
+    add column fecha_tipo_cambio  date;
+
+comment on column public.preliquidaciones.tipo_cambio_venta is
+    'Tipo de cambio venta SUNAT aplicado para mostrar los montos en soles (1 si la moneda ya es PEN, '
+    'null si no habia tipo de cambio disponible o la moneda no es USD/PEN).';
+comment on column public.preliquidaciones.fecha_tipo_cambio is
+    'Fecha de publicacion SUNAT del tipo_cambio_venta usado.';

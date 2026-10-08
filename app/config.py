@@ -40,7 +40,9 @@ class Settings(BaseSettings):
     gemini_model_texto_y_vision: str = "gemini-3.6-flash"
     # Respaldo, en orden, si el principal falla por no existir (404), por
     # cuota agotada (429) o por saturacion/caida (5xx). Separados por coma;
-    # vacio = sin respaldo.
+    # vacio = sin respaldo. gemini-3.5-flash va primero porque es el que se
+    # verifico con una factura escaneada (octubre 2026); gemini-3.7-flash
+    # respondia texto pero daba 503 con imagenes.
     gemini_models_respaldo: str = "gemini-3.5-flash,gemini-3.7-flash"
     # SIN respaldo a proposito: otro modelo de embeddings genera vectores
     # incompatibles con los ya guardados en historial_clasificaciones.

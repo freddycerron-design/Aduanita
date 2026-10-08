@@ -17,6 +17,7 @@ import { ReglaValidacionForm } from "@/components/admin/ReglaValidacionForm";
 import { ReglasValidacionTable } from "@/components/admin/ReglasValidacionTable";
 import { CargoEspecialForm } from "@/components/admin/CargoEspecialForm";
 import { CargosEspecialesTable } from "@/components/admin/CargosEspecialesTable";
+import { TiposCambioPanel } from "@/components/admin/TiposCambioPanel";
 import { UsuarioForm } from "@/components/admin/UsuarioForm";
 import { UsuariosTable } from "@/components/admin/UsuariosTable";
 import { ClienteForm } from "@/components/admin/ClienteForm";
@@ -26,8 +27,15 @@ import { DatosDocumentosPanel } from "@/components/admin/DatosDocumentosPanel";
 /** Orden de las pestañas: primero el "quién" (cuentas del equipo e
  * importadores), después el "cómo" (reglas de negocio que configuran el
  * comportamiento del sistema). */
-type PestanaAdmin = "usuarios" | "importadores" | "reglas" | "datos-documentos" | "cargos";
-const PESTANAS_VALIDAS: PestanaAdmin[] = ["usuarios", "importadores", "reglas", "datos-documentos", "cargos"];
+type PestanaAdmin = "usuarios" | "importadores" | "reglas" | "datos-documentos" | "cargos" | "tipo-cambio";
+const PESTANAS_VALIDAS: PestanaAdmin[] = [
+  "usuarios",
+  "importadores",
+  "reglas",
+  "datos-documentos",
+  "cargos",
+  "tipo-cambio",
+];
 
 /**
  * Panel de administracion, una pestaña por mantenimiento (antes las
@@ -85,7 +93,7 @@ export function AdminPage() {
         <ShieldAlert className="size-10 text-texto-secundario" strokeWidth={1.5} />
         <p className="text-sm text-texto-secundario">
           No tienes permiso para ver esta página. Solo un administrador puede gestionar usuarios,
-          importadores, reglas de validación y cargos especiales del arancel.
+          importadores, reglas de validación, cargos especiales y tipo de cambio.
         </p>
       </div>
     );
@@ -105,6 +113,7 @@ export function AdminPage() {
             <TabsTrigger value="reglas">Reglas de validación</TabsTrigger>
             <TabsTrigger value="datos-documentos">Datos de documentos</TabsTrigger>
             <TabsTrigger value="cargos">Cargos especiales</TabsTrigger>
+            <TabsTrigger value="tipo-cambio">Tipo de cambio</TabsTrigger>
           </TabsList>
 
           <TabsContent value="usuarios">
@@ -198,6 +207,10 @@ export function AdminPage() {
                 }}
               />
             )}
+          </TabsContent>
+
+          <TabsContent value="tipo-cambio">
+            <TiposCambioPanel />
           </TabsContent>
         </Tabs>
       </div>

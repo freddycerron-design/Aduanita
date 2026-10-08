@@ -95,6 +95,14 @@ from services.email_draft_service import (
 from services.export_service import generar_excel_despacho
 from services.gemini_classifier import PropuestaClasificacion, clasificar
 from services.preliquidacion_service import calcular_preliquidacion
+from services.tipo_cambio_service import (
+    TipoCambioDia,
+    TipoCambioSunatNoDisponibleError,
+    guardar_tipo_cambio,
+    hoy_lima,
+    obtener_tipo_cambio_vigente,
+    sincronizar_tipo_cambio_sunat,
+)
 from services.pdf_processor import (
     TIPO_A_SCHEMA,
     EXTENSION_POR_MIME,
@@ -583,7 +591,26 @@ class PreliquidacionOut(BaseModel):
     antidumping_monto: float
     derecho_especifico_monto: float
     total_tributos: float
+    # Tipo de cambio venta SUNAT con que se muestran los montos en soles
+    # (ver _tipo_cambio_para_moneda); None = no hay conversion.
+    tipo_cambio_venta: float | None = None
+    fecha_tipo_cambio: date | None = None
     actualizado_en: str
+
+
+class TipoCambioOut(BaseModel):
+    fecha: date
+    compra: float
+    venta: float
+    fuente: Literal["SUNAT", "MANUAL"]
+    actualizado_en: str
+
+
+class TipoCambioUpsert(BaseModel):
+    """Carga o correccion manual de un ADMIN para una fecha."""
+
+    compra: float = Field(gt=0, lt=100)
+    venta: float = Field(gt=0, lt=100)
 
 
 class CalcularPreliquidacionRequest(BaseModel):
@@ -1467,6 +1494,23 @@ def obtener_preliquidacion(
     }
 
 
+def _tipo_cambio_para_moneda(admin: Client, moneda: str) -> tuple[float | None, date | None]:
+    """Tipo de cambio venta para pasar a soles los montos de la
+    preliquidacion. SUNAT solo publica el del dolar: USD usa el vigente de
+    hoy (ver obtener_tipo_cambio_vigente), PEN no necesita conversion (1),
+    y cualquier otra moneda queda sin conversion (None) en vez de inventar
+    un tipo de cambio."""
+    codigo = moneda.strip().upper()
+    if codigo in ("PEN", "S/", "SOLES"):
+        return 1.0, hoy_lima()
+    if codigo not in ("USD", "US$", "DOLARES", "DÓLARES"):
+        return None, None
+    vigente = obtener_tipo_cambio_vigente(admin)
+    if vigente is None:
+        return None, None
+    return float(vigente["venta"]), date.fromisoformat(vigente["fecha"])
+
+
 @app.post("/despachos/{id_despacho}/preliquidacion/calcular", response_model=PreliquidacionOut)
 def calcular_preliquidacion_despacho(
     id_despacho: str,
@@ -1508,6 +1552,8 @@ def calcular_preliquidacion_despacho(
         if derecho_especifico_monto is None:
             derecho_especifico_monto = cargo_default["derecho_especifico_monto"] if cargo_default else 0
 
+    tipo_cambio_venta, fecha_tipo_cambio = _tipo_cambio_para_moneda(admin, datos.moneda)
+
     resultado = calcular_preliquidacion(
         valor_cif=datos.valor_cif,
         ad_valorem_tasa=ad_valorem_tasa,
@@ -1521,6 +1567,8 @@ def calcular_preliquidacion_despacho(
         "moneda": datos.moneda,
         "actualizado_por": usuario.id,
         "actualizado_en": _ahora_iso(),
+        "tipo_cambio_venta": tipo_cambio_venta,
+        "fecha_tipo_cambio": fecha_tipo_cambio.isoformat() if fecha_tipo_cambio else None,
         **resultado.model_dump(),
     }
     respuesta = admin.table("preliquidaciones").upsert(fila, on_conflict="id_despacho").execute()
@@ -2062,6 +2110,60 @@ def eliminar_cargo_especial(
     admin = get_supabase_admin_client()
     _obtener_cargo_especial_o_404(admin, id_cargo)
     admin.table("cargos_especiales_arancel").delete().eq("id", id_cargo).execute()
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------
+# Administracion (solo ADMIN): tipo de cambio SUNAT por fecha
+# ---------------------------------------------------------------------
+# La tabla se llena sola al calcular preliquidaciones (ver
+# services/tipo_cambio_service.py); esto es para consultarla, traer el del
+# dia a demanda y cargar/corregir fechas a mano.
+
+@app.get("/admin/tipos-cambio", response_model=list[TipoCambioOut])
+def listar_tipos_cambio(
+    limite: int = Query(default=120, ge=1, le=1000),
+    usuario: UsuarioAutenticado = Depends(get_current_staff),
+) -> list[dict]:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    return (
+        admin.table("tipos_cambio").select("*").order("fecha", desc=True).limit(limite).execute().data or []
+    )
+
+
+@app.post("/admin/tipos-cambio/sincronizar", response_model=TipoCambioOut)
+def sincronizar_tipo_cambio(usuario: UsuarioAutenticado = Depends(get_current_staff)) -> dict:
+    """Trae de SUNAT el tipo de cambio publicado hoy y lo guarda (no pisa
+    una fecha corregida a mano)."""
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    try:
+        return sincronizar_tipo_cambio_sunat(admin, usuario.id)
+    except TipoCambioSunatNoDisponibleError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@app.put("/admin/tipos-cambio/{fecha}", response_model=TipoCambioOut)
+def guardar_tipo_cambio_manual(
+    fecha: date, datos: TipoCambioUpsert, usuario: UsuarioAutenticado = Depends(get_current_staff)
+) -> dict:
+    _requiere_rol(usuario, set())
+    if fecha > hoy_lima():
+        raise HTTPException(status_code=400, detail="No se puede cargar un tipo de cambio de una fecha futura.")
+    admin = get_supabase_admin_client()
+    return guardar_tipo_cambio(
+        admin, TipoCambioDia(fecha=fecha, compra=datos.compra, venta=datos.venta), "MANUAL", usuario.id
+    )
+
+
+@app.delete("/admin/tipos-cambio/{fecha}")
+def eliminar_tipo_cambio(fecha: date, usuario: UsuarioAutenticado = Depends(get_current_staff)) -> dict:
+    _requiere_rol(usuario, set())
+    admin = get_supabase_admin_client()
+    respuesta = admin.table("tipos_cambio").delete().eq("fecha", fecha.isoformat()).execute()
+    if not respuesta.data:
+        raise HTTPException(status_code=404, detail="No hay tipo de cambio para esa fecha.")
     return {"status": "ok"}
 
 
