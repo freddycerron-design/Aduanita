@@ -43,7 +43,7 @@ services:
       - key: GEMINI_MODEL_TEXTO_Y_VISION
         value: gemini-3.6-flash
       - key: GEMINI_MODELS_RESPALDO
-        value: gemini-3.7-flash,gemini-3.5-flash
+        value: gemini-3.5-flash,gemini-3.7-flash
       - key: GEMINI_MODEL_EMBEDDINGS
         value: gemini-embedding-001
       # Origenes permitidos para CORS, separados por coma -- el frontend

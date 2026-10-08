@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # Respaldo, en orden, si el principal falla por no existir (404), por
     # cuota agotada (429) o por saturacion/caida (5xx). Separados por coma;
     # vacio = sin respaldo.
-    gemini_models_respaldo: str = "gemini-3.7-flash,gemini-3.5-flash"
+    gemini_models_respaldo: str = "gemini-3.5-flash,gemini-3.7-flash"
     # SIN respaldo a proposito: otro modelo de embeddings genera vectores
     # incompatibles con los ya guardados en historial_clasificaciones.
     gemini_model_embeddings: str = "gemini-embedding-001"
