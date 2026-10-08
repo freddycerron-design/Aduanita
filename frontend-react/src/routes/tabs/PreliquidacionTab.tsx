@@ -160,7 +160,6 @@ export function PreliquidacionTab({ idDespacho, documentos }: PreliquidacionTabP
 
       {resultado && (
         <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-texto">Resultado</h2>
           <TablaResultado resultado={resultado} />
           <p className="rounded-xl border border-amber/40 bg-amber/10 px-4 py-3 text-[13px] leading-relaxed text-amber">
             Antidumping y derecho específico requieren verificación caso a caso (INDECOPI/MEF) -- los valores
@@ -246,8 +245,30 @@ function TablaResultado({ resultado }: { resultado: PreliquidacionOut }) {
     { etiqueta: "Total tributos", valor: resultado.total_tributos, total: true },
   ];
 
+  const mensajeTipoCambio = enSoles ? null : tipoCambio !== null && resultado.fecha_tipo_cambio ? (
+    <p className="text-[13px] text-texto-secundario">
+      Tipo de cambio venta SUNAT del {formatearFecha(resultado.fecha_tipo_cambio)}:{" "}
+      <span className="font-mono font-semibold text-texto">S/ {tipoCambio.toFixed(3)}</span>
+      {resultado.fecha_tipo_cambio !== fechaCalculo &&
+        " (último publicado antes de la fecha del cálculo)"}
+      .
+    </p>
+  ) : (
+    <p className="text-[13px] text-amber">
+      {moneda === "USD"
+        ? "No hay tipo de cambio disponible (SUNAT no respondió y no hay uno guardado). Cárgalo en Configuración > Tipo de cambio y vuelve a calcular."
+        : `SUNAT solo publica el tipo de cambio del dólar: los montos en ${resultado.moneda} no se convierten a soles.`}
+    </p>
+  );
+
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-3">
+      {/* El tipo de cambio va en la misma línea que el título, a la
+          izquierda: se lee antes de mirar la columna en soles. */}
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <h2 className="text-sm font-semibold text-texto">Resultado</h2>
+        {mensajeTipoCambio}
+      </div>
       <div className="overflow-x-auto rounded-xl border border-border bg-card">
         <table className="w-full text-sm">
           <thead>
@@ -296,22 +317,6 @@ function TablaResultado({ resultado }: { resultado: PreliquidacionOut }) {
         </table>
       </div>
 
-      {!enSoles &&
-        (tipoCambio !== null && resultado.fecha_tipo_cambio ? (
-          <p className="text-[13px] text-texto-secundario">
-            Tipo de cambio venta SUNAT del {formatearFecha(resultado.fecha_tipo_cambio)}:{" "}
-            <span className="font-mono font-semibold text-texto">S/ {tipoCambio.toFixed(3)}</span>
-            {resultado.fecha_tipo_cambio !== fechaCalculo &&
-              " (último publicado antes de la fecha del cálculo)"}
-            .
-          </p>
-        ) : (
-          <p className="text-[13px] text-amber">
-            {moneda === "USD"
-              ? "No hay tipo de cambio disponible (SUNAT no respondió y no hay uno guardado). Cárgalo en Configuración > Tipo de cambio y vuelve a calcular."
-              : `SUNAT solo publica el tipo de cambio del dólar: los montos en ${resultado.moneda} no se convierten a soles.`}
-          </p>
-        ))}
     </div>
   );
 }
