@@ -53,6 +53,9 @@ export function PreliquidacionTab({ idDespacho, documentos }: PreliquidacionTabP
   const calcular = useCalcularPreliquidacion(idDespacho);
 
   const [valorCif, setValorCif] = useState("");
+  // No editable: sale del cálculo guardado o de la moneda de la factura
+  // (el Valor CIF se arma con montos de la factura, así que su moneda es
+  // la de ella). Cambiarla a mano rompería esa coherencia.
   const [moneda, setMoneda] = useState("USD");
   const [antidumping, setAntidumping] = useState("0");
   const [derechoEspecifico, setDerechoEspecifico] = useState("0");
@@ -65,18 +68,18 @@ export function PreliquidacionTab({ idDespacho, documentos }: PreliquidacionTabP
   useEffect(() => {
     if (!data || inicializado) return;
     if (data.preliquidacion) {
-      setValorCif(String(data.preliquidacion.valor_cif));
+      setValorCif(dosDecimales(data.preliquidacion.valor_cif));
       setMoneda(data.preliquidacion.moneda);
-      setAntidumping(String(data.preliquidacion.antidumping_monto));
-      setDerechoEspecifico(String(data.preliquidacion.derecho_especifico_monto));
+      setAntidumping(dosDecimales(data.preliquidacion.antidumping_monto));
+      setDerechoEspecifico(dosDecimales(data.preliquidacion.derecho_especifico_monto));
     } else {
       const sugerido = sugerirValorCif(documentos);
-      if (sugerido !== null) setValorCif(sugerido.toFixed(2));
-      if (data.cargo_especial_default) {
-        setAntidumping(String(data.cargo_especial_default.antidumping_monto));
-        setDerechoEspecifico(String(data.cargo_especial_default.derecho_especifico_monto));
-        setMoneda(data.cargo_especial_default.moneda);
-      }
+      if (sugerido !== null) setValorCif(dosDecimales(sugerido));
+      const monedaFactura = documentos.find((d) => d.tipo_documento === "FACTURA")?.contenido_json.moneda;
+      if (typeof monedaFactura === "string" && monedaFactura.trim()) setMoneda(monedaFactura.trim().toUpperCase());
+      else if (data.cargo_especial_default) setMoneda(data.cargo_especial_default.moneda);
+      setAntidumping(dosDecimales(data.cargo_especial_default?.antidumping_monto ?? 0));
+      setDerechoEspecifico(dosDecimales(data.cargo_especial_default?.derecho_especifico_monto ?? 0));
     }
     setInicializado(true);
   }, [data, documentos, inicializado]);
@@ -127,54 +130,26 @@ export function PreliquidacionTab({ idDespacho, documentos }: PreliquidacionTabP
         </div>
 
         {puedeCalcular ? (
-          <form onSubmit={manejarSubmit} className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="pre-valor-cif">Valor CIF</Label>
-                <Input
-                  id="pre-valor-cif"
-                  type="number"
-                  step="0.01"
-                  required
-                  value={valorCif}
-                  onChange={(e) => setValorCif(e.target.value)}
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="pre-moneda">Moneda</Label>
-                <Input id="pre-moneda" value={moneda} onChange={(e) => setMoneda(e.target.value)} />
-              </div>
+          <form
+            onSubmit={manejarSubmit}
+            className="flex flex-wrap items-end gap-4 rounded-xl border border-border bg-card p-5"
+          >
+            <CampoMonto id="pre-valor-cif" etiqueta="Valor CIF" valor={valorCif} onCambiar={setValorCif} requerido />
+            <div className="flex w-24 flex-col gap-2">
+              <Label htmlFor="pre-moneda">Moneda</Label>
+              <Input id="pre-moneda" value={moneda} readOnly tabIndex={-1} className="cursor-default bg-bg text-texto-secundario" />
             </div>
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="pre-antidumping">Antidumping</Label>
-                <Input
-                  id="pre-antidumping"
-                  type="number"
-                  step="0.01"
-                  value={antidumping}
-                  onChange={(e) => setAntidumping(e.target.value)}
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="pre-derecho">Derecho específico</Label>
-                <Input
-                  id="pre-derecho"
-                  type="number"
-                  step="0.01"
-                  value={derechoEspecifico}
-                  onChange={(e) => setDerechoEspecifico(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div>
-              <Button type="submit" disabled={calcular.isPending}>
-                {calcular.isPending && <Loader2 className="animate-spin" />}
-                {calcular.isPending ? "Calculando..." : "Calcular"}
-              </Button>
-            </div>
+            <CampoMonto id="pre-antidumping" etiqueta="Antidumping" valor={antidumping} onCambiar={setAntidumping} />
+            <CampoMonto
+              id="pre-derecho"
+              etiqueta="Derecho específico"
+              valor={derechoEspecifico}
+              onCambiar={setDerechoEspecifico}
+            />
+            <Button type="submit" disabled={calcular.isPending}>
+              {calcular.isPending && <Loader2 className="animate-spin" />}
+              {calcular.isPending ? "Calculando..." : "Calcular"}
+            </Button>
           </form>
         ) : (
           <p className="text-sm text-texto-secundario">
@@ -199,6 +174,46 @@ export function PreliquidacionTab({ idDespacho, documentos }: PreliquidacionTabP
 
 const formatoMonto = new Intl.NumberFormat("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+/** Valor de un input numérico con 2 decimales ("1250" -> "1250.00"). Sin
+ * separador de miles: es lo que acepta un <input type="number">. */
+function dosDecimales(valor: number | string): string {
+  const numero = typeof valor === "number" ? valor : Number(valor);
+  return Number.isFinite(numero) ? numero.toFixed(2) : String(valor);
+}
+
+/** Campo de monto angosto: se escribe libre y al salir del campo queda
+ * con 2 decimales. */
+function CampoMonto({
+  id,
+  etiqueta,
+  valor,
+  onCambiar,
+  requerido = false,
+}: {
+  id: string;
+  etiqueta: string;
+  valor: string;
+  onCambiar: (valor: string) => void;
+  requerido?: boolean;
+}) {
+  return (
+    <div className="flex w-40 flex-col gap-2">
+      <Label htmlFor={id}>{etiqueta}</Label>
+      <Input
+        id={id}
+        type="number"
+        step="0.01"
+        min="0"
+        required={requerido}
+        value={valor}
+        onChange={(e) => onCambiar(e.target.value)}
+        onBlur={() => valor !== "" && onCambiar(dosDecimales(valor))}
+        className="text-right tabular-nums"
+      />
+    </div>
+  );
+}
+
 /** `2026-10-08` -> `08/10/2026` sin pasar por Date (evita el corrimiento
  * de un día por zona horaria). */
 function formatearFecha(iso: string): string {
@@ -219,12 +234,13 @@ function TablaResultado({ resultado }: { resultado: PreliquidacionOut }) {
   const tipoCambio = resultado.tipo_cambio_venta;
   const fechaCalculo = resultado.actualizado_en.slice(0, 10);
 
-  const filas: { etiqueta: string; valor: number; total?: boolean }[] = [
+  // `tasa` solo en los conceptos que se calculan como porcentaje.
+  const filas: { etiqueta: string; tasa?: number; valor: number; total?: boolean }[] = [
     { etiqueta: "Valor CIF", valor: resultado.valor_cif },
-    { etiqueta: `Ad Valorem (${resultado.ad_valorem_tasa}%)`, valor: resultado.ad_valorem_monto },
+    { etiqueta: "Ad Valorem", tasa: resultado.ad_valorem_tasa, valor: resultado.ad_valorem_monto },
     { etiqueta: "Base IGV/IPM", valor: resultado.base_igv_ipm },
-    { etiqueta: "IGV (16%)", valor: resultado.igv_monto },
-    { etiqueta: "IPM (2%)", valor: resultado.ipm_monto },
+    { etiqueta: "IGV", tasa: 16, valor: resultado.igv_monto },
+    { etiqueta: "IPM", tasa: 2, valor: resultado.ipm_monto },
     { etiqueta: "Antidumping", valor: resultado.antidumping_monto },
     { etiqueta: "Derecho específico", valor: resultado.derecho_especifico_monto },
     { etiqueta: "Total tributos", valor: resultado.total_tributos, total: true },
@@ -238,6 +254,9 @@ function TablaResultado({ resultado }: { resultado: PreliquidacionOut }) {
             <tr className="border-b border-border text-[13px] text-texto-secundario">
               <th scope="col" className="px-4 py-2.5 text-left font-medium">
                 Concepto
+              </th>
+              <th scope="col" className="w-20 px-4 py-2.5 text-right font-medium">
+                %
               </th>
               <th scope="col" className="px-4 py-2.5 text-right font-medium">
                 {resultado.moneda}
@@ -260,6 +279,9 @@ function TablaResultado({ resultado }: { resultado: PreliquidacionOut }) {
                 }
               >
                 <td className={fila.total ? "px-4 py-3" : "px-4 py-2.5 text-texto-secundario"}>{fila.etiqueta}</td>
+                <td className="px-4 py-2.5 text-right font-mono tabular-nums text-texto-secundario">
+                  {fila.tasa === undefined ? "" : `${fila.tasa}%`}
+                </td>
                 <td className="px-4 py-2.5 text-right font-mono tabular-nums text-texto">
                   {formatoMonto.format(fila.valor)}
                 </td>
