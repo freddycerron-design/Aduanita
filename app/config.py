@@ -9,11 +9,12 @@ importan desde aqui.
 import logging
 from functools import lru_cache
 
+import httpx
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from supabase import Client, create_client
+from supabase import Client, ClientOptions, create_client
 
 
 class Settings(BaseSettings):
@@ -74,9 +75,28 @@ def get_supabase_admin_client() -> Client:
     backend para las operaciones automatizadas del pipeline (subir
     documentos, guardar resultados de validacion, etc). Nunca exponer
     esta clave ni este cliente al frontend.
+
+    Es una sola instancia para todo el proceso y FastAPI atiende cada
+    request sincronico en un hilo distinto, asi que se comparte entre
+    hilos. Por defecto supabase-py habla HTTP/2 por UNA conexion
+    multiplexada, y con varios requests a la vez Supabase la cortaba
+    (httpx.RemoteProtocolError: ConnectionTerminated) y fallaban todos los
+    que iban por ella -- el frontend lo veia como "Failed to fetch" al
+    recargar un despacho tras calcular. Con HTTP/1.1 cada hilo toma su
+    propia conexion del pool de httpx, que si es seguro entre hilos.
     """
     settings = get_settings()
-    return create_client(settings.supabase_url, settings.supabase_service_role_key)
+    cliente_http = httpx.Client(
+        http2=False,
+        timeout=httpx.Timeout(120, connect=10),
+        limits=httpx.Limits(max_connections=40, max_keepalive_connections=20),
+        follow_redirects=True,
+    )
+    return create_client(
+        settings.supabase_url,
+        settings.supabase_service_role_key,
+        options=ClientOptions(httpx_client=cliente_http),
+    )
 
 
 def get_supabase_user_client(access_token: str) -> Client:

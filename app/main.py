@@ -61,13 +61,14 @@ documentos. Dos barreras independientes lo sostienen:
      secciones 8, 9 y 15).
 """
 from __future__ import annotations
+import logging
 
 from datetime import date, datetime, timezone
 from typing import Literal, get_args, get_origin
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, ValidationError, computed_field
 from supabase import Client
 
@@ -126,12 +127,29 @@ from services.validation_engine import (
 )
 
 settings = get_settings()
+_logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Aduafy API",
     description="Automatizacion de revision documental aduanera y clasificacion arancelaria asistida.",
     version="0.1.0",
 )
+
+@app.middleware("http")
+async def _errores_inesperados_como_json(request, call_next):
+    """Un error no controlado se convierte aca en un 500 JSON. Se registra
+    ANTES que CORSMiddleware (Starlette envuelve en orden inverso), asi la
+    respuesta pasa por CORS: sin esto el 500 salia sin cabeceras CORS y el
+    navegador solo mostraba "Failed to fetch", ocultando el error real."""
+    try:
+        return await call_next(request)
+    except Exception:
+        _logger.exception("Error no controlado en %s %s", request.method, request.url.path)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Error interno del servidor. Intenta de nuevo en unos segundos."},
+        )
+
 
 app.add_middleware(
     CORSMiddleware,
