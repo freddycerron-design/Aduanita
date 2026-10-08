@@ -200,9 +200,14 @@ function Nomenclatura({
 
   return (
     <section className="flex min-w-0 flex-col gap-3" aria-labelledby="titulo-nomenclatura">
-      <h3 id="titulo-nomenclatura" className="text-sm font-semibold text-texto">
-        Ubicación en el arancel
-      </h3>
+      {/* La ayuda va al lado del título y no debajo de la lista: así no
+          suma una línea de alto y "Otros requisitos" entra sin scroll. */}
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h3 id="titulo-nomenclatura" className="text-sm font-semibold text-texto">
+          Ubicación en el arancel
+        </h3>
+        <p className="text-[13px] text-texto-secundario">Elige otra subpartida de 10 dígitos para ver su ficha.</p>
+      </div>
       <ol className="max-h-[42vh] overflow-y-auto rounded-lg border border-border py-1">
         {lineas.map((linea, indice) => (
           <FilaNomenclatura
@@ -213,9 +218,6 @@ function Nomenclatura({
           />
         ))}
       </ol>
-      <p className="text-[13px] text-texto-secundario">
-        Elige otra subpartida de 10 dígitos para ver su ficha.
-      </p>
     </section>
   );
 }
