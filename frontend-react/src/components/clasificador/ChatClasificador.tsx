@@ -92,7 +92,7 @@ export function ChatClasificador({ chat, onVerFicha }: ChatClasificadorProps) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="max-w-prose text-[13px] text-texto-secundario">
+        <p className="min-w-0 flex-1 text-[13px] text-texto-secundario">
           Describe la mercancía o adjunta una foto o ficha técnica. La IA te hará las preguntas que un liquidador
           necesita para proponer la subpartida nacional, aplicando las reglas de clasificación del Perú.
         </p>
@@ -106,9 +106,11 @@ export function ChatClasificador({ chat, onVerFicha }: ChatClasificadorProps) {
 
       <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4">
         {mensajes.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 py-8 text-center">
-            <Sparkles className="size-8 text-coral" strokeWidth={1.5} aria-hidden="true" />
-            <p className="text-sm text-texto">¿Qué mercancía quieres clasificar?</p>
+          <div className="flex flex-col items-center gap-2 py-1 text-center">
+            <p className="flex items-center gap-2 text-sm text-texto">
+              <Sparkles className="size-4 text-coral" aria-hidden="true" />
+              ¿Qué mercancía quieres clasificar?
+            </p>
             <div className="flex flex-wrap justify-center gap-2">
               {EJEMPLOS.map((ejemplo) => (
                 <button
